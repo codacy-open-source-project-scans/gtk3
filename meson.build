@@ -1,5 +1,5 @@
 project('gtk', 'c',
-        version: '4.11.4',
+        version: '4.11.5',
         default_options: [
           'buildtype=debugoptimized',
           'warning_level=1',
@@ -736,6 +736,27 @@ endif
 
 build_gir = gir.found() and (get_option('introspection').enabled() or
                              (get_option('introspection').allowed() and get_option('gtk_doc')))
+
+# Resource building
+glib_compile_resources = find_program('glib-compile-resources')
+
+objcopy_supports_add_symbol = false
+objcopy = find_program('objcopy', required : false)
+if objcopy.found()
+  objcopy_supports_add_symbol = run_command(objcopy, '--help', check: false).stdout().contains('--add-symbol')
+endif
+
+ld_is_bfd = false
+ld = find_program('ld', required : false)
+if ld.found()
+  ld_is_bfd = run_command(ld, '--version', check: false).stdout().contains('GNU ld')
+endif
+
+if not meson.is_cross_build() and build_machine.cpu_family() == 'x86_64' and build_machine.system() == 'linux' and objcopy.found() and objcopy_supports_add_symbol and ld.found() and ld_is_bfd
+  can_use_objcopy_for_resources = true
+else
+  can_use_objcopy_for_resources = false
+endif
 
 project_build_root = meson.current_build_dir()
 

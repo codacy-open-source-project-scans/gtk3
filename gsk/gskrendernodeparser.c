@@ -454,6 +454,21 @@ parse_double (GtkCssParser *parser,
 }
 
 static gboolean
+parse_positive_double (GtkCssParser *parser,
+                       Context      *context,
+                       gpointer      out_double)
+{
+  if (gtk_css_parser_has_token (parser, GTK_CSS_TOKEN_SIGNED_NUMBER)
+      || gtk_css_parser_has_token (parser, GTK_CSS_TOKEN_SIGNED_INTEGER))
+    {
+      gtk_css_parser_error_syntax (parser, "Expected a positive number");
+      return FALSE;
+    }
+
+  return gtk_css_parser_consume_number (parser, out_double);
+}
+
+static gboolean
 parse_point (GtkCssParser *parser,
              Context      *context,
              gpointer      out_point)
@@ -1242,10 +1257,10 @@ parse_radial_gradient_node_internal (GtkCssParser *parser,
   const Declaration declarations[] = {
     { "bounds", parse_rect, NULL, &bounds },
     { "center", parse_point, NULL, &center },
-    { "hradius", parse_double, NULL, &hradius },
-    { "vradius", parse_double, NULL, &vradius },
-    { "start", parse_double, NULL, &start },
-    { "end", parse_double, NULL, &end },
+    { "hradius", parse_positive_double, NULL, &hradius },
+    { "vradius", parse_positive_double, NULL, &vradius },
+    { "start", parse_positive_double, NULL, &start },
+    { "end", parse_positive_double, NULL, &end },
     { "stops", parse_stops, clear_stops, &stops },
   };
   GskRenderNode *result;
@@ -1335,7 +1350,7 @@ parse_inset_shadow_node (GtkCssParser *parser,
     { "dx", parse_double, NULL, &dx },
     { "dy", parse_double, NULL, &dy },
     { "spread", parse_double, NULL, &spread },
-    { "blur", parse_double, NULL, &blur }
+    { "blur", parse_positive_double, NULL, &blur }
   };
 
   parse_declarations (parser, context, declarations, G_N_ELEMENTS (declarations));
@@ -1737,7 +1752,7 @@ parse_outset_shadow_node (GtkCssParser *parser,
     { "dx", parse_double, NULL, &dx },
     { "dy", parse_double, NULL, &dy },
     { "spread", parse_double, NULL, &spread },
-    { "blur", parse_double, NULL, &blur }
+    { "blur", parse_positive_double, NULL, &blur }
   };
 
   parse_declarations (parser, context, declarations, G_N_ELEMENTS (declarations));
@@ -2017,7 +2032,7 @@ parse_blur_node (GtkCssParser *parser,
   GskRenderNode *child = NULL;
   double blur_radius = 1.0;
   const Declaration declarations[] = {
-    { "blur", parse_double, NULL, &blur_radius },
+    { "blur", parse_positive_double, NULL, &blur_radius },
     { "child", parse_node, clear_node, &child },
   };
   GskRenderNode *result;
@@ -2475,6 +2490,15 @@ printer_init (Printer       *self,
   self->named_texture_counter = 0;
 
   printer_init_duplicates_for_node (self, node);
+}
+
+static void
+printer_clear (Printer *self)
+{
+  if (self->str)
+    g_string_free (self->str, TRUE);
+  g_hash_table_unref (self->named_nodes);
+  g_hash_table_unref (self->named_textures);
 }
 
 #define IDENT_LEVEL 2 /* Spaces per level */
@@ -3686,6 +3710,7 @@ GBytes *
 gsk_render_node_serialize (GskRenderNode *node)
 {
   Printer p;
+  GBytes *res;
 
   printer_init (&p, node);
 
@@ -3705,5 +3730,9 @@ gsk_render_node_serialize (GskRenderNode *node)
       render_node_print (&p, node);
     }
 
-  return g_string_free_to_bytes (p.str);
+  res = g_string_free_to_bytes (g_steal_pointer (&p.str));
+
+  printer_clear (&p);
+
+  return res;
 }

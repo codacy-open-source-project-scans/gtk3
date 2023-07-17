@@ -236,9 +236,9 @@ gsk_vulkan_clip_transform (GskVulkanClip         *dest,
 }
 
 gboolean
-gsk_vulkan_clip_intersects_rect (const GskVulkanClip    *self,
-                                 const graphene_point_t *offset,
-                                 const graphene_rect_t  *rect)
+gsk_vulkan_clip_may_intersect_rect (const GskVulkanClip    *self,
+                                    const graphene_point_t *offset,
+                                    const graphene_rect_t  *rect)
 {
   graphene_rect_t r = *rect;
   r.origin.x += offset->x;
@@ -252,13 +252,9 @@ gsk_vulkan_clip_intersects_rect (const GskVulkanClip    *self,
       return FALSE;
 
     case GSK_VULKAN_CLIP_NONE:
-      return r.size.width > 0 && r.size.height > 0;
-
     case GSK_VULKAN_CLIP_RECT:
-      return graphene_rect_intersection (&self->rect.bounds, &r, NULL);
-
     case GSK_VULKAN_CLIP_ROUNDED:
-      return gsk_rounded_rect_intersects_rect (&self->rect, &r);
+      return graphene_rect_intersection (&self->rect.bounds, &r, NULL);
     }
 }
 
@@ -288,3 +284,17 @@ gsk_vulkan_clip_contains_rect (const GskVulkanClip    *self,
       return gsk_rounded_rect_contains_rect (&self->rect, &r);
     }
 }
+
+GskVulkanShaderClip
+gsk_vulkan_clip_get_shader_clip (const GskVulkanClip    *self,
+                                 const graphene_point_t *offset,
+                                 const graphene_rect_t  *rect)
+{
+  if (gsk_vulkan_clip_contains_rect (self, offset, rect))
+    return GSK_VULKAN_SHADER_CLIP_NONE;
+  else if (self->type == GSK_VULKAN_CLIP_RECT)
+    return GSK_VULKAN_SHADER_CLIP_RECT;
+  else
+    return GSK_VULKAN_SHADER_CLIP_ROUNDED;
+}
+

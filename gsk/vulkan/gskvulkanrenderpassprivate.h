@@ -10,19 +10,17 @@
 G_BEGIN_DECLS
 
 
-GskVulkanRenderPass *   gsk_vulkan_render_pass_new                      (GdkVulkanContext       *context,
-                                                                         GskVulkanRender        *render,
-                                                                         GskVulkanImage         *target,
-                                                                         const graphene_vec2_t  *scale,
-                                                                         const graphene_rect_t  *viewport,
-                                                                         cairo_region_t         *clip,
-                                                                         GskRenderNode          *node);
+GskVulkanRenderPass *   gsk_vulkan_render_pass_new                      (void);
 
 void                    gsk_vulkan_render_pass_free                     (GskVulkanRenderPass    *self);
 
 void                    gsk_vulkan_render_pass_add                      (GskVulkanRenderPass    *self,
                                                                          GskVulkanRender        *render,
-                                                                         GskRenderNode          *node);
+                                                                         int                     width,
+                                                                         int                     height,
+                                                                         cairo_rectangle_int_t  *clip,
+                                                                         GskRenderNode          *node,
+                                                                         const graphene_rect_t  *viewport);
 
 G_END_DECLS
 

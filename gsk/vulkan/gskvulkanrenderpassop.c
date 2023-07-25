@@ -15,9 +15,7 @@ struct _GskVulkanRenderPassOp
   GskVulkanOp op;
 
   GskVulkanImage *image;
-  GskVulkanRenderPass *render_pass;
   cairo_rectangle_int_t area;
-  graphene_size_t viewport_size;
 
   VkImageLayout initial_layout;
   VkImageLayout final_layout;
@@ -29,7 +27,6 @@ gsk_vulkan_render_pass_op_finish (GskVulkanOp *op)
   GskVulkanRenderPassOp *self = (GskVulkanRenderPassOp *) op;
 
   g_object_unref (self->image);
-  gsk_vulkan_render_pass_free (self->render_pass);
 }
 
 static void
@@ -119,8 +116,8 @@ gsk_vulkan_render_pass_op_command (GskVulkanOp      *op,
                     &(VkViewport) {
                         .x = 0,
                         .y = 0,
-                        .width = self->viewport_size.width,
-                        .height = self->viewport_size.height,
+                        .width = gsk_vulkan_image_get_width (self->image),
+                        .height = gsk_vulkan_image_get_height (self->image),
                         .minDepth = 0,
                         .maxDepth = 1
                     });
@@ -243,85 +240,75 @@ static const GskVulkanOpClass GSK_VULKAN_RENDER_PASS_END_OP_CLASS = {
 };
 
 void
-gsk_vulkan_render_pass_op (GskVulkanRender       *render,
-                           GdkVulkanContext      *context,
-                           GskVulkanImage        *image,
-                           cairo_region_t        *clip,
-                           const graphene_vec2_t *scale,
-                           const graphene_rect_t *viewport,
-                           GskRenderNode         *node,
-                           VkImageLayout          initial_layout,
-                           VkImageLayout          final_layout)
+gsk_vulkan_render_pass_begin_op (GskVulkanRender             *render,
+                                 GskVulkanImage              *image,
+                                 const cairo_rectangle_int_t *area,
+                                 VkImageLayout                initial_layout,
+                                 VkImageLayout                final_layout)
 {
   GskVulkanRenderPassOp *self;
-  GskVulkanRenderPassEndOp *end;
 
   self = (GskVulkanRenderPassOp *) gsk_vulkan_op_alloc (render, &GSK_VULKAN_RENDER_PASS_OP_CLASS);
 
-  self->image = image;
+  self->image = g_object_ref (image);
   self->initial_layout = initial_layout;
   self->final_layout = final_layout;
-  cairo_region_get_extents (clip, &self->area);
-  self->viewport_size = viewport->size;
+  self->area = *area;
+}
 
-  self->render_pass = gsk_vulkan_render_pass_new (context,
-                                                  render,
-                                                  self->image,
-                                                  scale,
-                                                  viewport,
-                                                  clip,
-                                                  node);
+void
+gsk_vulkan_render_pass_end_op (GskVulkanRender *render,
+                               GskVulkanImage  *image,
+                               VkImageLayout    final_layout)
+{
+  GskVulkanRenderPassEndOp *self;
 
-  /* This invalidates the self pointer */
-  gsk_vulkan_render_pass_add (self->render_pass, render, node);
+  self = (GskVulkanRenderPassEndOp *) gsk_vulkan_op_alloc (render, &GSK_VULKAN_RENDER_PASS_END_OP_CLASS);
 
-  end = (GskVulkanRenderPassEndOp *) gsk_vulkan_op_alloc (render, &GSK_VULKAN_RENDER_PASS_END_OP_CLASS);
-
-  end->image = g_object_ref (image);
-  end->final_layout = final_layout;
+  self->image = g_object_ref (image);
+  self->final_layout = final_layout;
 }
 
 GskVulkanImage *
 gsk_vulkan_render_pass_op_offscreen (GskVulkanRender       *render,
-                                     GdkVulkanContext      *context,
                                      const graphene_vec2_t *scale,
                                      const graphene_rect_t *viewport,
                                      GskRenderNode         *node)
 {
-  graphene_rect_t view;
+  GskVulkanRenderPass *render_pass;
+  GdkVulkanContext *context;
   GskVulkanImage *image;
-  cairo_region_t *clip;
-  float scale_x, scale_y;
+  int width, height;
 
-  scale_x = graphene_vec2_get_x (scale);
-  scale_y = graphene_vec2_get_y (scale);
-  view = GRAPHENE_RECT_INIT (scale_x * viewport->origin.x,
-                             scale_y * viewport->origin.y,
-                             ceil (scale_x * viewport->size.width),
-                             ceil (scale_y * viewport->size.height));
+  width = ceil (graphene_vec2_get_x (scale) * viewport->size.width);
+  height = ceil (graphene_vec2_get_y (scale) * viewport->size.height);
 
+  context = gsk_vulkan_render_get_context (render);
   image = gsk_vulkan_image_new_for_offscreen (context,
                                               gdk_vulkan_context_get_offscreen_format (context,
                                                   gsk_render_node_get_preferred_depth (node)),
-                                              view.size.width, view.size.height);
+                                              width, height);
 
-  clip = cairo_region_create_rectangle (&(cairo_rectangle_int_t) {
-                                          0, 0,
-                                          gsk_vulkan_image_get_width (image),
-                                          gsk_vulkan_image_get_height (image)
-                                        });
+  gsk_vulkan_render_pass_begin_op (render,
+                                   image,
+                                   &(cairo_rectangle_int_t) { 0, 0, width, height },
+                                   VK_IMAGE_LAYOUT_UNDEFINED,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-  gsk_vulkan_render_pass_op (render,
-                             context,
-                             image,
-                             clip,
-                             scale,
-                             &view,
-                             node,
-                             VK_IMAGE_LAYOUT_UNDEFINED,
-                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  render_pass = gsk_vulkan_render_pass_new ();
+  gsk_vulkan_render_pass_add (render_pass,
+                              render,
+                              width, height,
+                              &(cairo_rectangle_int_t) { 0, 0, width, height },
+                              node,
+                              viewport);
+  gsk_vulkan_render_pass_free (render_pass);
 
-  cairo_region_destroy (clip);
+  gsk_vulkan_render_pass_end_op (render,
+                                 image,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+  g_object_unref (image);
 
   return image;
 }

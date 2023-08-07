@@ -1,5 +1,5 @@
 project('gtk', 'c',
-        version: '4.11.5',
+        version: '4.13.0',
         default_options: [
           'buildtype=debugoptimized',
           'warning_level=1',
@@ -339,14 +339,16 @@ else
   test_cflags = []
 endif
 
-common_cflags = cc.get_supported_arguments(test_cflags)
-
 # Symbol visibility
 if get_option('default_library') != 'static'
   if os_win32
     cdata.set('DLL_EXPORT', true)
+  else
+    test_cflags += ['-fvisibility=hidden']
   endif
 endif
+
+common_cflags = cc.get_supported_arguments(test_cflags)
 
 common_ldflags = cc.get_supported_link_arguments([
   '-Wl,-Bsymbolic',
@@ -483,6 +485,10 @@ if wayland_enabled
     'xkbcommon @0@'.format(xkbcommon_req),
     'wayland-egl',
   ]
+
+  if wlprotocolsdep.version().version_compare('>=1.32')
+    cdata.set('HAVE_TOPLEVEL_STATE_SUSPENDED', 1)
+  endif
 endif
 
 x11_pkgs = []
@@ -736,15 +742,17 @@ if not gir.found() and get_option('introspection').enabled()
 endif
 
 build_gir = gir.found() and (get_option('introspection').enabled() or
-                             (get_option('introspection').allowed() and get_option('gtk_doc')))
+                             (get_option('introspection').allowed() and get_option('documentation')))
 
 # Resource building
 glib_compile_resources = find_program('glib-compile-resources')
 
 objcopy_supports_add_symbol = false
+objcopy_supports_section_alignment = false
 objcopy = find_program('objcopy', required : false)
 if objcopy.found()
   objcopy_supports_add_symbol = run_command(objcopy, '--help', check: false).stdout().contains('--add-symbol')
+  objcopy_supports_section_alignment = run_command(objcopy, '--help', check: false).stdout().contains('--set-section-alignment')
 endif
 
 ld_is_bfd = false
@@ -753,7 +761,7 @@ if ld.found()
   ld_is_bfd = run_command(ld, '--version', check: false).stdout().contains('GNU ld')
 endif
 
-if not meson.is_cross_build() and build_machine.cpu_family() == 'x86_64' and build_machine.system() == 'linux' and objcopy.found() and objcopy_supports_add_symbol and ld.found() and ld_is_bfd
+if not meson.is_cross_build() and build_machine.cpu_family() == 'x86_64' and build_machine.system() == 'linux' and objcopy.found() and objcopy_supports_add_symbol and objcopy_supports_section_alignment and ld.found() and ld_is_bfd
   can_use_objcopy_for_resources = true
 else
   can_use_objcopy_for_resources = false
@@ -912,7 +920,7 @@ summary('Linker', cc.get_linker_id(), section: 'Toolchain')
 summary('Debugging', get_option('debug'), section: 'Build')
 summary('Optimization', get_option('optimization'), section: 'Build')
 summary('Introspection', build_gir, section: 'Build')
-summary('Documentation', get_option('gtk_doc'), section: 'Build')
+summary('Documentation', get_option('documentation'), section: 'Build')
 summary('Man pages', get_option('man-pages'), section: 'Build')
 summary('Testsuite', get_option('build-testsuite'), section: 'Build')
 summary('Tests', get_option('build-tests'), section: 'Build')

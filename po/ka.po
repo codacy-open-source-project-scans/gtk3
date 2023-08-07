@@ -11,8 +11,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gtk\n"
 "Report-Msgid-Bugs-To: https://gitlab.gnome.org/GNOME/gtk/-/issues/\n"
-"POT-Creation-Date: 2023-07-22 08:17+0000\n"
-"PO-Revision-Date: 2023-07-22 15:23+0200\n"
+"POT-Creation-Date: 2023-07-31 15:14+0000\n"
+"PO-Revision-Date: 2023-08-01 06:03+0200\n"
 "Last-Translator: Ekaterine Papava <papava.e@gtu.ge>\n"
 "Language-Team: Georgian <http://mail.gnome.org/mailman/listinfo/gnome-ge-"
 "list>\n"
@@ -1751,7 +1751,7 @@ msgstr "დახურვა"
 #. * suspend or screen locking, and the caller hasn't specified
 #. * a reason.
 #.
-#: gtk/gtkapplication-dbus.c:713
+#: gtk/gtkapplication-dbus.c:721
 msgid "Reason not specified"
 msgstr "მიზეზი მითითებული არაა"
 
@@ -2227,7 +2227,7 @@ msgstr "ფაილი ამ სახელით უკვე არსე�
 #: gtk/gtkmessagedialog.c:179 gtk/gtkmountoperation.c:608
 #: gtk/print/gtkpagesetupunixdialog.c:282 gtk/print/gtkprintbackend.c:638
 #: gtk/print/gtkprintunixdialog.c:682 gtk/print/gtkprintunixdialog.c:839
-#: gtk/gtkwindow.c:6193 gtk/ui/gtkappchooserdialog.ui:48
+#: gtk/gtkwindow.c:6238 gtk/ui/gtkappchooserdialog.ui:48
 #: gtk/ui/gtkassistant.ui:52 gtk/ui/gtkcolorchooserdialog.ui:36
 #: gtk/ui/gtkfontchooserdialog.ui:27
 msgid "_Cancel"
@@ -2315,7 +2315,7 @@ msgid "If you delete an item, it will be permanently lost."
 msgstr "თუ წაშლით ელემენტს, ის სამუდამოდ დაიკარგება."
 
 #: gtk/gtkfilechooserwidget.c:1185 gtk/gtkfilechooserwidget.c:1815
-#: gtk/gtklabel.c:5693 gtk/gtktext.c:6127 gtk/gtktextview.c:9024
+#: gtk/gtklabel.c:5693 gtk/gtktext.c:6125 gtk/gtktextview.c:9018
 msgid "_Delete"
 msgstr "წაშლა"
 
@@ -2654,19 +2654,19 @@ msgstr "დახურვა"
 msgid "Close the infobar"
 msgstr "საინფორმაციო ზოლის დახურვა"
 
-#: gtk/gtklabel.c:5690 gtk/gtktext.c:6115 gtk/gtktextview.c:9012
+#: gtk/gtklabel.c:5690 gtk/gtktext.c:6113 gtk/gtktextview.c:9006
 msgid "Cu_t"
 msgstr "ამოჭრა"
 
-#: gtk/gtklabel.c:5691 gtk/gtktext.c:6119 gtk/gtktextview.c:9016
+#: gtk/gtklabel.c:5691 gtk/gtktext.c:6117 gtk/gtktextview.c:9010
 msgid "_Copy"
 msgstr "ასლი"
 
-#: gtk/gtklabel.c:5692 gtk/gtktext.c:6123 gtk/gtktextview.c:9020
+#: gtk/gtklabel.c:5692 gtk/gtktext.c:6121 gtk/gtktextview.c:9014
 msgid "_Paste"
 msgstr "ჩასმა"
 
-#: gtk/gtklabel.c:5698 gtk/gtktext.c:6136 gtk/gtktextview.c:9045
+#: gtk/gtklabel.c:5698 gtk/gtktext.c:6134 gtk/gtktextview.c:9039
 msgid "Select _All"
 msgstr "ყველაფრის _მონიშვნა"
 
@@ -2678,7 +2678,7 @@ msgstr "_ბმულის გახსნა"
 msgid "Copy _Link Address"
 msgstr "დაა_კოპირე ბმულის მისამართი"
 
-#: gtk/gtklabel.c:5751 gtk/gtktext.c:2716 gtk/gtktextview.c:9094
+#: gtk/gtklabel.c:5751 gtk/gtktext.c:2716 gtk/gtktextview.c:9088
 msgid "Context menu"
 msgstr "კონტექსტური მენიუ"
 
@@ -2749,7 +2749,7 @@ msgid "Play"
 msgstr "დაკვრა"
 
 #: gtk/gtkmessagedialog.c:162 gtk/gtkmessagedialog.c:180
-#: gtk/print/gtkprintbackend.c:639 gtk/gtkwindow.c:6194
+#: gtk/print/gtkprintbackend.c:639 gtk/gtkwindow.c:6239
 msgid "_OK"
 msgstr "_დიახ"
 
@@ -3613,24 +3613,24 @@ msgctxt "accessibility"
 msgid "Sidebar"
 msgstr "გვერდითა ზოლი"
 
-#: gtk/gtktext.c:6141 gtk/gtktextview.c:9050
+#: gtk/gtktext.c:6139 gtk/gtktextview.c:9044
 msgid "Insert _Emoji"
 msgstr "ემოჯის _ჩასმა"
 
-#: gtk/gtktextview.c:9032
+#: gtk/gtktextview.c:9026
 msgid "_Undo"
 msgstr "_დაბრუნება"
 
-#: gtk/gtktextview.c:9036
+#: gtk/gtktextview.c:9030
 msgid "_Redo"
 msgstr "_გამეორება"
 
-#: gtk/gtkwindow.c:6182
+#: gtk/gtkwindow.c:6227
 #, c-format
 msgid "Do you want to use GTK Inspector?"
 msgstr "გნებავთ GTK-ის ინსპექტორის გამოყენება?"
 
-#: gtk/gtkwindow.c:6184
+#: gtk/gtkwindow.c:6229
 #, c-format
 msgid ""
 "GTK Inspector is an interactive debugger that lets you explore and modify "
@@ -3641,7 +3641,7 @@ msgstr ""
 "ნებისმიერი GTK აპლიკაციის შიდა პარამეტრები დაათვალიეროთ და შეცვალოთ. მისი "
 "გამოყენებით ასევე შეიძლება პროგრამა ავარიულად დასრულდეს."
 
-#: gtk/gtkwindow.c:6189
+#: gtk/gtkwindow.c:6234
 msgid "Don’t show this message again"
 msgstr "მეტჯერ აღარ მაჩვენო ეს გაფრთხილება"
 
@@ -4278,11 +4278,11 @@ msgstr "იერარქია"
 msgid "Implements"
 msgstr "იმპლემენტაციას უკეთებს"
 
-#: gtk/inspector/visual.c:640 gtk/inspector/visual.c:659
+#: gtk/inspector/visual.c:637 gtk/inspector/visual.c:656
 msgid "Theme is hardcoded by GTK_THEME"
 msgstr "თემა ჩადგმულია GTK_THEME-ის მიერ"
 
-#: gtk/inspector/visual.c:908
+#: gtk/inspector/visual.c:905
 msgid "Backend does not support window scaling"
 msgstr "უკანაბოლოს ფანჯრის მასშტაბირების მხარდაჭერა არ გააჩნია"
 
@@ -4378,11 +4378,7 @@ msgstr "ფოკუსის ჩვენება"
 msgid "Show Accessibility warnings"
 msgstr "წვდომადობის გაფრთხილებების ჩვენება"
 
-#: gtk/inspector/visual.ui:670
-msgid "Simulate Touchscreen"
-msgstr "სენსორული ეკრანის სიმულაცია"
-
-#: gtk/inspector/visual.ui:701
+#: gtk/inspector/visual.ui:667
 msgid "Inspect Inspector"
 msgstr "კონტროლის ინსპექტორი"
 
@@ -7220,7 +7216,7 @@ msgstr "სტილის CSS ფაილიდან გამოყენე
 
 #: tools/gtk-builder-tool-preview.c:187 tools/gtk-builder-tool-screenshot.c:370
 #: tools/gtk-builder-tool-validate.c:268 tools/gtk-rendernode-tool-show.c:109
-#: tools/gtk-rendernode-tool-render.c:131
+#: tools/gtk-rendernode-tool-render.c:204
 #, c-format
 msgid "Could not initialize windowing system\n"
 msgstr "ფანჯრული სისტემის ინიციალიზაციის შეცდომა\n"
@@ -7256,7 +7252,6 @@ msgid "Failed to take a screenshot\n"
 msgstr "ეკრანის ანაბეჭდის გადაღება ვერ მოხერხდა\n"
 
 #: tools/gtk-builder-tool-screenshot.c:309
-#: tools/gtk-rendernode-tool-render.c:83
 #, c-format
 msgid ""
 "File %s exists.\n"
@@ -7266,13 +7261,13 @@ msgstr ""
 "თავზე გადასაწერად გამოიყენეთ --force.\n"
 
 #: tools/gtk-builder-tool-screenshot.c:332
-#: tools/gtk-rendernode-tool-render.c:96
+#: tools/gtk-rendernode-tool-render.c:172
 #, c-format
 msgid "Output written to %s.\n"
 msgstr "გამოტანილი ინფორმაცია ჩაწერილია %s-ში.\n"
 
 #: tools/gtk-builder-tool-screenshot.c:336
-#: tools/gtk-rendernode-tool-render.c:100
+#: tools/gtk-rendernode-tool-render.c:176
 #, c-format
 msgid "Failed to save %s: %s\n"
 msgstr "\"%s'-ის შენახვის შეცდომა: %s\n"
@@ -7286,12 +7281,11 @@ msgid "Save as node file instead of png"
 msgstr "PNG-ის მაგიერ კვანძის ფაილად ჩაწერა"
 
 #: tools/gtk-builder-tool-screenshot.c:362
-#: tools/gtk-rendernode-tool-render.c:123
 msgid "Overwrite existing file"
 msgstr "არსებულ ფაილზე გადაწერა"
 
 #: tools/gtk-builder-tool-screenshot.c:363
-#: tools/gtk-rendernode-tool-render.c:124
+#: tools/gtk-rendernode-tool-render.c:197
 msgid "FILE…"
 msgstr "FILE…"
 
@@ -7497,7 +7491,7 @@ msgid "Provide information about the render node."
 msgstr "შეიყვანეთ ინფორმაცია რენდერის კვანძის შესახებ."
 
 #: tools/gtk-rendernode-tool-info.c:222 tools/gtk-rendernode-tool-show.c:130
-#: tools/gtk-rendernode-tool-render.c:152
+#: tools/gtk-rendernode-tool-render.c:225
 #, c-format
 msgid "No .node file specified\n"
 msgstr ".ui ფაილი მითითებული არაა\n"
@@ -7509,26 +7503,41 @@ msgstr "შეგიძლიათ მხოლოდ ერთი .node ფა
 
 #: tools/gtk-rendernode-tool-show.c:117
 msgid "Show the render node."
-msgstr "რენდერის კვანძის ჩვენება"
+msgstr "რენდერის კვანძის ჩვენება."
 
 #: tools/gtk-rendernode-tool-show.c:136
 #, c-format
 msgid "Can only preview a single .node file\n"
 msgstr "შეგიძლიათ მხოლოდ ერთი .node ფაილის გადახედვა\n"
 
-#: tools/gtk-rendernode-tool-render.c:122
+#: tools/gtk-rendernode-tool-render.c:123
+#, c-format
+msgid ""
+"File %s exists.\n"
+"If you want to overwrite, specify the filename.\n"
+msgstr ""
+"ფაილი %s არსებობს.\n"
+"თუ გნებავთ, თავზე გადააწეროთ, ფაილის სახელი მიუთითეთ.\n"
+"\n"
+
+#: tools/gtk-rendernode-tool-render.c:137
+#, c-format
+msgid "Failed to generate SVG: %s\n"
+msgstr "შეცდომა SVG-ის გენერაციისას: %s\n"
+
+#: tools/gtk-rendernode-tool-render.c:196
 msgid "Renderer to use"
 msgstr "გამოყენებული რენდერერი"
 
-#: tools/gtk-rendernode-tool-render.c:122
+#: tools/gtk-rendernode-tool-render.c:196
 msgid "RENDERER"
 msgstr "რენდერერი"
 
-#: tools/gtk-rendernode-tool-render.c:139
+#: tools/gtk-rendernode-tool-render.c:212
 msgid "Render a .node file to an image."
 msgstr ".ui ფაილის რენდერი გამოსახულებაში."
 
-#: tools/gtk-rendernode-tool-render.c:158
+#: tools/gtk-rendernode-tool-render.c:231
 #, c-format
 msgid "Can only render a single .node file to a single output file\n"
 msgstr "ერთი .node ფაილის მხოლოდ ერთ გამოტანის ფაილში რენდერი შეგიძლიათ\n"
@@ -7645,6 +7654,9 @@ msgstr ""
 "\"%s\"-ში თემის ინდექსის ფაილი აღმოჩენილი არაა.\n"
 "თუ მართლა გნებავთ, ხატულების კეში აქ შექმნათ, --ignore-theme-index "
 "გამოიყენეთ.\n"
+
+#~ msgid "Simulate Touchscreen"
+#~ msgstr "სენსორული ეკრანის სიმულაცია"
 
 #~ msgid "Take a screenshot of the file."
 #~ msgstr "ფაილის ეკრანის ანაბეჭდის აღება."

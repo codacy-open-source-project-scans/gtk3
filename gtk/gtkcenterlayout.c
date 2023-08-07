@@ -106,16 +106,6 @@ gtk_center_layout_get_request_mode (GtkLayoutManager *layout_manager,
            : GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
 }
 
-static gboolean
-get_expand (GtkWidget      *widget,
-            GtkOrientation  orientation)
-{
-  if (orientation == GTK_ORIENTATION_HORIZONTAL)
-    return gtk_widget_get_hexpand (widget);
-  else
-    return gtk_widget_get_vexpand (widget);
-}
-
 static void
 gtk_center_layout_distribute (GtkCenterLayout  *self,
                               int               for_size,
@@ -160,26 +150,26 @@ gtk_center_layout_distribute (GtkCenterLayout  *self,
       avail = size - needed_spacing - (sizes[0].minimum_size + sizes[2].minimum_size);
 
       if (self->shrink_center_last)
-        natural_size = CLAMP (size - needed_spacing - (sizes[0].natural_size + sizes[2].natural_size), sizes[1].minimum_size, sizes[1].natural_size);
-      else
         natural_size = sizes[1].natural_size;
+      else
+        natural_size = CLAMP (size - needed_spacing - (sizes[0].natural_size + sizes[2].natural_size), sizes[1].minimum_size, sizes[1].natural_size);
 
       center_size = CLAMP (avail, sizes[1].minimum_size, natural_size);
-      center_expand = get_expand (self->center_widget, self->orientation);
+      center_expand = gtk_widget_compute_expand (self->center_widget, self->orientation);
     }
 
   if (self->start_widget)
     {
-      avail = MIN ((size - needed_spacing - center_size) / 2, size - needed_spacing - (center_size + sizes[2].minimum_size));
+      avail = size - needed_spacing - (center_size + sizes[2].minimum_size);
       start_size = CLAMP (avail, sizes[0].minimum_size, sizes[0].natural_size);
-      start_expand = get_expand (self->start_widget, self->orientation);
+      start_expand = gtk_widget_compute_expand (self->start_widget, self->orientation);
     }
 
    if (self->end_widget)
     {
-      avail = MIN ((size - needed_spacing - center_size) / 2, size - needed_spacing - (center_size + sizes[0].minimum_size));
+      avail = size - needed_spacing - (center_size + sizes[0].minimum_size);
       end_size = CLAMP (avail, sizes[2].minimum_size, sizes[2].natural_size);
-      end_expand = get_expand (self->end_widget, self->orientation);
+      end_expand = gtk_widget_compute_expand (self->end_widget, self->orientation);
     }
 
   if (self->center_widget)
@@ -617,14 +607,14 @@ gtk_center_layout_class_init (GtkCenterLayoutClass *klass)
    * natural widths, the start and end widgets start shrinking and the
    * center child keeps natural width until they reach minimum width.
    *
-   * If set to `TRUE`, start and end widgets keep natural width and the
+   * If set to `FALSE`, start and end widgets keep natural width and the
    * center widget starts shrinking instead.
    *
    * Since: 4.12
    */
   props[PROP_SHRINK_CENTER_LAST] =
       g_param_spec_boolean ("shrink-center-last", NULL, NULL,
-                            FALSE,
+                            TRUE,
                             GTK_PARAM_READWRITE|G_PARAM_EXPLICIT_NOTIFY);
 
   g_object_class_install_properties (object_class, LAST_PROP, props);
@@ -635,6 +625,7 @@ gtk_center_layout_init (GtkCenterLayout *self)
 {
   self->orientation = GTK_ORIENTATION_HORIZONTAL;
   self->baseline_pos = GTK_BASELINE_POSITION_CENTER;
+  self->shrink_center_last = TRUE;
 }
 
 /**
@@ -841,7 +832,7 @@ gtk_center_layout_get_end_widget (GtkCenterLayout *self)
  * natural widths, the start and end widgets start shrinking and the
  * center child keeps natural width until they reach minimum width.
  *
- * If set to `TRUE`, start and end widgets keep natural width and the
+ * If set to `FALSE`, start and end widgets keep natural width and the
  * center widget starts shrinking instead.
  *
  * Since: 4.12

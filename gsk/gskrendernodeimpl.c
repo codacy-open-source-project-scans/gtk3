@@ -25,8 +25,11 @@
 #include "gskdebugprivate.h"
 #include "gskdiffprivate.h"
 #include "gl/gskglrenderer.h"
+#include "gskpathprivate.h"
+#include "gskrectprivate.h"
 #include "gskrendererprivate.h"
 #include "gskroundedrectprivate.h"
+#include "gskstrokeprivate.h"
 #include "gsktransformprivate.h"
 
 #include "gdk/gdktextureprivate.h"
@@ -3967,7 +3970,7 @@ gsk_repeat_node_draw (GskRenderNode *node,
   scale_x *= width / self->child_bounds.size.width;
   scale_y *= height / self->child_bounds.size.height;
   cairo_surface_set_device_scale (surface, scale_x, scale_y);
-  cairo_surface_set_device_offset (surface, 
+  cairo_surface_set_device_offset (surface,
                                    - self->child_bounds.origin.x * scale_x,
                                    - self->child_bounds.origin.y * scale_y);
 
@@ -4138,7 +4141,7 @@ gsk_clip_node_diff (GskRenderNode  *node1,
       gsk_render_node_diff_impossible (node1, node2, region);
     }
 }
- 
+
 static void
 gsk_clip_node_class_init (gpointer g_class,
                                gpointer class_data)
@@ -4364,6 +4367,423 @@ gsk_rounded_clip_node_get_clip (const GskRenderNode *node)
   const GskRoundedClipNode *self = (const GskRoundedClipNode *) node;
 
   return &self->clip;
+}
+
+/* }}} */
+/* {{{ GSK_FILL_NODE */
+
+/**
+ * GskFillNode:
+ *
+ * A render node filling the area given by [struct@Gsk.Path]
+ * and [enum@Gsk.FillRule] with the child node.
+ *
+ * Since: 4.14
+ */
+
+struct _GskFillNode
+{
+  GskRenderNode render_node;
+
+  GskRenderNode *child;
+  GskPath *path;
+  GskFillRule fill_rule;
+};
+
+static void
+gsk_fill_node_finalize (GskRenderNode *node)
+{
+  GskFillNode *self = (GskFillNode *) node;
+  GskRenderNodeClass *parent_class = g_type_class_peek (g_type_parent (GSK_TYPE_FILL_NODE));
+
+  gsk_render_node_unref (self->child);
+  gsk_path_unref (self->path);
+
+  parent_class->finalize (node);
+}
+
+static void
+gsk_fill_node_draw (GskRenderNode *node,
+                    cairo_t       *cr)
+{
+  GskFillNode *self = (GskFillNode *) node;
+
+  cairo_save (cr);
+
+  switch (self->fill_rule)
+  {
+    case GSK_FILL_RULE_WINDING:
+      cairo_set_fill_rule (cr, CAIRO_FILL_RULE_WINDING);
+      break;
+    case GSK_FILL_RULE_EVEN_ODD:
+      cairo_set_fill_rule (cr, CAIRO_FILL_RULE_EVEN_ODD);
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+  gsk_path_to_cairo (self->path, cr);
+  if (gsk_render_node_get_node_type (self->child) == GSK_COLOR_NODE &&
+      gsk_rect_contains_rect (&self->child->bounds, &node->bounds))
+    {
+      gdk_cairo_set_source_rgba (cr, gsk_color_node_get_color (self->child));
+      cairo_fill (cr);
+    }
+  else
+    {
+      cairo_clip (cr);
+      gsk_render_node_draw (self->child, cr);
+    }
+
+  cairo_restore (cr);
+}
+
+static void
+gsk_fill_node_diff (GskRenderNode  *node1,
+                    GskRenderNode  *node2,
+                    cairo_region_t *region)
+{
+  GskFillNode *self1 = (GskFillNode *) node1;
+  GskFillNode *self2 = (GskFillNode *) node2;
+
+  if (self1->path == self2->path)
+    {
+      cairo_region_t *sub;
+      cairo_rectangle_int_t clip_rect;
+
+      sub = cairo_region_create();
+      gsk_render_node_diff (self1->child, self2->child, sub);
+      rectangle_init_from_graphene (&clip_rect, &node1->bounds);
+      cairo_region_intersect_rectangle (sub, &clip_rect);
+      cairo_region_union (region, sub);
+      cairo_region_destroy (sub);
+    }
+  else
+    {
+      gsk_render_node_diff_impossible (node1, node2, region);
+    }
+}
+
+static void
+gsk_fill_node_class_init (gpointer g_class,
+                          gpointer class_data)
+{
+  GskRenderNodeClass *node_class = g_class;
+
+  node_class->node_type = GSK_FILL_NODE;
+
+  node_class->finalize = gsk_fill_node_finalize;
+  node_class->draw = gsk_fill_node_draw;
+  node_class->diff = gsk_fill_node_diff;
+}
+
+/**
+ * gsk_fill_node_new:
+ * @child: The node to fill the area with
+ * @path: The path describing the area to fill
+ * @fill_rule: The fill rule to use
+ *
+ * Creates a `GskRenderNode` that will fill the @child in the area
+ * given by @path and @fill_rule.
+ *
+ * Returns: (transfer none) (type GskFillNode): A new `GskRenderNode`
+ *
+ * Since: 4.14
+ */
+GskRenderNode *
+gsk_fill_node_new (GskRenderNode *child,
+                   GskPath       *path,
+                   GskFillRule    fill_rule)
+{
+  GskFillNode *self;
+  GskRenderNode *node;
+  graphene_rect_t path_bounds;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE (child), NULL);
+  g_return_val_if_fail (path != NULL, NULL);
+
+  self = gsk_render_node_alloc (GSK_FILL_NODE);
+  node = (GskRenderNode *) self;
+
+  self->child = gsk_render_node_ref (child);
+  self->path = gsk_path_ref (path);
+  self->fill_rule = fill_rule;
+
+  if (gsk_path_get_bounds (path, &path_bounds))
+    graphene_rect_intersection (&path_bounds, &child->bounds, &node->bounds);
+  else
+    graphene_rect_init_from_rect (&node->bounds, graphene_rect_zero ());
+
+  return node;
+}
+
+/**
+ * gsk_fill_node_get_child:
+ * @node: (type GskFillNode): a fill `GskRenderNode`
+ *
+ * Gets the child node that is getting drawn by the given @node.
+ *
+ * Returns: (transfer none): The child that is getting drawn
+ *
+ * Since: 4.14
+ */
+GskRenderNode *
+gsk_fill_node_get_child (const GskRenderNode *node)
+{
+  const GskFillNode *self = (const GskFillNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_FILL_NODE), NULL);
+
+  return self->child;
+}
+
+/**
+ * gsk_fill_node_get_path:
+ * @node: (type GskFillNode): a fill `GskRenderNode`
+ *
+ * Retrieves the path used to describe the area filled with the contents of
+ * the @node.
+ *
+ * Returns: (transfer none): a `GskPath`
+ *
+ * Since: 4.14
+ */
+GskPath *
+gsk_fill_node_get_path (const GskRenderNode *node)
+{
+  const GskFillNode *self = (const GskFillNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_FILL_NODE), NULL);
+
+  return self->path;
+}
+
+/**
+ * gsk_fill_node_get_fill_rule:
+ * @node: (type GskFillNode): a fill `GskRenderNode`
+ *
+ * Retrieves the fill rule used to determine how the path is filled.
+ *
+ * Returns: a `GskFillRule`
+ *
+ * Since: 4.14
+ */
+GskFillRule
+gsk_fill_node_get_fill_rule (const GskRenderNode *node)
+{
+  const GskFillNode *self = (const GskFillNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_FILL_NODE), GSK_FILL_RULE_WINDING);
+
+  return self->fill_rule;
+}
+
+/* }}} */
+/* {{{ GSK_STROKE_NODE */
+
+/**
+ * GskStrokeNode:
+ *
+ * A render node that will fill the area determined by stroking the the given
+ * [struct@Gsk.Path] using the [struct@Gsk.Stroke] attributes.
+ *
+ * Since: 4.14
+ */
+
+struct _GskStrokeNode
+{
+  GskRenderNode render_node;
+
+  GskRenderNode *child;
+  GskPath *path;
+  GskStroke stroke;
+};
+
+static void
+gsk_stroke_node_finalize (GskRenderNode *node)
+{
+  GskStrokeNode *self = (GskStrokeNode *) node;
+  GskRenderNodeClass *parent_class = g_type_class_peek (g_type_parent (GSK_TYPE_STROKE_NODE));
+
+  gsk_render_node_unref (self->child);
+  gsk_path_unref (self->path);
+  gsk_stroke_clear (&self->stroke);
+
+  parent_class->finalize (node);
+}
+
+static void
+gsk_stroke_node_draw (GskRenderNode *node,
+                      cairo_t       *cr)
+{
+  GskStrokeNode *self = (GskStrokeNode *) node;
+
+  cairo_save (cr);
+
+  if (gsk_render_node_get_node_type (self->child) == GSK_COLOR_NODE &&
+      gsk_rect_contains_rect (&self->child->bounds, &node->bounds))
+    {
+      gdk_cairo_set_source_rgba (cr, gsk_color_node_get_color (self->child));
+    }
+  else
+    {
+      gsk_cairo_rectangle (cr, &self->child->bounds);
+      cairo_clip (cr);
+      cairo_push_group (cr);
+      gsk_render_node_draw (self->child, cr);
+      cairo_pop_group_to_source (cr);
+    }
+
+  gsk_stroke_to_cairo (&self->stroke, cr);
+
+  gsk_path_to_cairo (self->path, cr);
+  cairo_stroke (cr);
+
+  cairo_restore (cr);
+}
+
+static void
+gsk_stroke_node_diff (GskRenderNode  *node1,
+                      GskRenderNode  *node2,
+                      cairo_region_t *region)
+{
+  GskStrokeNode *self1 = (GskStrokeNode *) node1;
+  GskStrokeNode *self2 = (GskStrokeNode *) node2;
+
+  if (self1->path == self2->path &&
+      gsk_stroke_equal (&self1->stroke, &self2->stroke))
+    {
+      cairo_region_t *sub;
+      cairo_rectangle_int_t clip_rect;
+
+      sub = cairo_region_create();
+      gsk_render_node_diff (self1->child, self2->child, sub);
+      rectangle_init_from_graphene (&clip_rect, &node1->bounds);
+      cairo_region_intersect_rectangle (sub, &clip_rect);
+      cairo_region_union (region, sub);
+      cairo_region_destroy (sub);
+    }
+  else
+    {
+      gsk_render_node_diff_impossible (node1, node2, region);
+    }
+}
+
+static void
+gsk_stroke_node_class_init (gpointer g_class,
+                            gpointer class_data)
+{
+  GskRenderNodeClass *node_class = g_class;
+
+  node_class->node_type = GSK_STROKE_NODE;
+
+  node_class->finalize = gsk_stroke_node_finalize;
+  node_class->draw = gsk_stroke_node_draw;
+  node_class->diff = gsk_stroke_node_diff;
+}
+
+/**
+ * gsk_stroke_node_new:
+ * @child: The node to stroke the area with
+ * @path: (transfer none): The path describing the area to stroke
+ * @stroke: (transfer none): The stroke attributes to use
+ *
+ * Creates a #GskRenderNode that will fill the outline generated by stroking
+ * the given @path using the attributes defined in @stroke.
+ *
+ * The area is filled with @child.
+ *
+ * Returns: (transfer none) (type GskStrokeNode): A new #GskRenderNode
+ *
+ * Since: 4.14
+ */
+GskRenderNode *
+gsk_stroke_node_new (GskRenderNode   *child,
+                     GskPath         *path,
+                     const GskStroke *stroke)
+{
+  GskStrokeNode *self;
+  GskRenderNode *node;
+  graphene_rect_t stroke_bounds;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE (child), NULL);
+  g_return_val_if_fail (path != NULL, NULL);
+  g_return_val_if_fail (stroke != NULL, NULL);
+
+  self = gsk_render_node_alloc (GSK_STROKE_NODE);
+  node = (GskRenderNode *) self;
+
+  self->child = gsk_render_node_ref (child);
+  self->path = gsk_path_ref (path);
+  gsk_stroke_init_copy (&self->stroke, stroke);
+
+  if (gsk_path_get_stroke_bounds (self->path, &self->stroke, &stroke_bounds))
+    graphene_rect_intersection (&stroke_bounds, &child->bounds, &node->bounds);
+  else
+    graphene_rect_init_from_rect (&node->bounds, graphene_rect_zero ());
+
+  return node;
+}
+
+/**
+ * gsk_stroke_node_get_child:
+ * @node: (type GskStrokeNode): a stroke #GskRenderNode
+ *
+ * Gets the child node that is getting drawn by the given @node.
+ *
+ * Returns: (transfer none): The child that is getting drawn
+ *
+ * Since: 4.14
+ */
+GskRenderNode *
+gsk_stroke_node_get_child (const GskRenderNode *node)
+{
+  const GskStrokeNode *self = (const GskStrokeNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_STROKE_NODE), NULL);
+
+  return self->child;
+}
+
+/**
+ * gsk_stroke_node_get_path:
+ * @node: (type GskStrokeNode): a stroke #GskRenderNode
+ *
+ * Retrieves the path that will be stroked with the contents of
+ * the @node.
+ *
+ * Returns: (transfer none): a #GskPath
+ *
+ * Since: 4.14
+ */
+GskPath *
+gsk_stroke_node_get_path (const GskRenderNode *node)
+{
+  const GskStrokeNode *self = (const GskStrokeNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_STROKE_NODE), NULL);
+
+  return self->path;
+}
+
+/**
+ * gsk_stroke_node_get_stroke:
+ * @node: (type GskStrokeNode): a stroke #GskRenderNode
+ *
+ * Retrieves the stroke attributes used in this @node.
+ *
+ * Returns: a #GskStroke
+ *
+ * Since: 4.14
+ */
+const GskStroke *
+gsk_stroke_node_get_stroke (const GskRenderNode *node)
+{
+  const GskStrokeNode *self = (const GskStrokeNode *) node;
+
+  g_return_val_if_fail (GSK_IS_RENDER_NODE_TYPE (node, GSK_STROKE_NODE), NULL);
+
+  return &self->stroke;
 }
 
 /* }}} */
@@ -6259,6 +6679,8 @@ GSK_DEFINE_RENDER_NODE_TYPE (gsk_color_matrix_node, GSK_COLOR_MATRIX_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_repeat_node, GSK_REPEAT_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_clip_node, GSK_CLIP_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_rounded_clip_node, GSK_ROUNDED_CLIP_NODE)
+GSK_DEFINE_RENDER_NODE_TYPE (gsk_fill_node, GSK_FILL_NODE)
+GSK_DEFINE_RENDER_NODE_TYPE (gsk_stroke_node, GSK_STROKE_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_shadow_node, GSK_SHADOW_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_blend_node, GSK_BLEND_NODE)
 GSK_DEFINE_RENDER_NODE_TYPE (gsk_cross_fade_node, GSK_CROSS_FADE_NODE)
@@ -6407,6 +6829,16 @@ gsk_render_node_init_types_once (void)
                                                     sizeof (GskDebugNode),
                                                     gsk_debug_node_class_init);
   gsk_render_node_types[GSK_DEBUG_NODE] = node_type;
+
+  node_type = gsk_render_node_type_register_static (I_("GskFillNode"),
+                                                    sizeof (GskFillNode),
+                                                    gsk_fill_node_class_init);
+  gsk_render_node_types[GSK_FILL_NODE] = node_type;
+
+  node_type = gsk_render_node_type_register_static (I_("GskStrokeNode"),
+                                                    sizeof (GskStrokeNode),
+                                                    gsk_stroke_node_class_init);
+  gsk_render_node_types[GSK_STROKE_NODE] = node_type;
 }
 
 static void

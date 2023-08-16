@@ -30,6 +30,7 @@
 
 #include "gsk/gskrendernodeprivate.h"
 #include "gsk/gskroundedrectprivate.h"
+#include "gsk/gskstrokeprivate.h"
 
 #include "gtk/gskpangoprivate.h"
 
@@ -105,6 +106,14 @@ struct _GtkSnapshotState {
     struct {
       GskRoundedRect bounds;
     } rounded_clip;
+    struct {
+      GskPath *path;
+      GskFillRule fill_rule;
+    } fill;
+    struct {
+      GskPath *path;
+      GskStroke stroke;
+    } stroke;
     struct {
       gsize n_shadows;
       GskShadow *shadows;
@@ -1097,6 +1106,178 @@ gtk_snapshot_push_rounded_clip (GtkSnapshot          *snapshot,
 }
 
 static GskRenderNode *
+gtk_snapshot_collect_fill (GtkSnapshot      *snapshot,
+                           GtkSnapshotState *state,
+                           GskRenderNode   **nodes,
+                           guint             n_nodes)
+{
+  GskRenderNode *node, *fill_node;
+
+  node = gtk_snapshot_collect_default (snapshot, state, nodes, n_nodes);
+  if (node == NULL)
+    return NULL;
+
+  fill_node = gsk_fill_node_new (node,
+                                 state->data.fill.path,
+                                 state->data.fill.fill_rule);
+
+  if (fill_node->bounds.size.width == 0 ||
+      fill_node->bounds.size.height == 0)
+    {
+      gsk_render_node_unref (node);
+      gsk_render_node_unref (fill_node);
+      return NULL;
+    }
+
+  gsk_render_node_unref (node);
+
+  return fill_node;
+}
+
+static void
+gtk_snapshot_clear_fill (GtkSnapshotState *state)
+{
+  gsk_path_unref (state->data.fill.path);
+}
+
+/**
+ * gtk_snapshot_push_fill:
+ * @snapshot: a `GtkSnapshot`
+ * @path: The path describing the area to fill
+ * @fill_rule: The fill rule to use
+ *
+ * Fills the area given by @path and @fill_rule with an image and discards everything
+ * outside of it.
+ *
+ * The image is recorded until the next call to [method@Gtk.Snapshot.pop].
+ *
+ * If you want to fill the path with a color, [method@Gtk.Snapshot.append_fill]
+ * may be more convenient.
+ *
+ * Since: 4.14
+ */
+void
+gtk_snapshot_push_fill (GtkSnapshot *snapshot,
+                        GskPath     *path,
+                        GskFillRule  fill_rule)
+{
+  GtkSnapshotState *state;
+
+  gtk_snapshot_ensure_identity (snapshot);
+
+  state = gtk_snapshot_push_state (snapshot,
+                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   gtk_snapshot_collect_fill,
+                                   gtk_snapshot_clear_fill);
+
+  state->data.fill.path = gsk_path_ref (path);
+  state->data.fill.fill_rule = fill_rule;
+}
+
+/**
+ * gtk_snapshot_append_fill:
+ * @snapshot: a `GtkSnapshot`
+ * @path: The path describing the area to fill
+ * @fill_rule: The fill rule to use
+ * @color: the color to fill the path with
+ *
+ * A convenience method to fill a path with a color.
+ *
+ * See [method@Gtk.Snapshot.push_fill] if you need
+ * to fill a path with more complex content than
+ * a color.
+ *
+ * Since: 4.14
+ */
+void
+gtk_snapshot_append_fill (GtkSnapshot   *snapshot,
+                          GskPath       *path,
+                          GskFillRule    fill_rule,
+                          const GdkRGBA *color)
+{
+  graphene_rect_t bounds;
+
+  gsk_path_get_bounds (path, &bounds);
+  gtk_snapshot_push_fill (snapshot, path, fill_rule);
+  gtk_snapshot_append_color (snapshot, color, &bounds);
+  gtk_snapshot_pop (snapshot);
+}
+
+static GskRenderNode *
+gtk_snapshot_collect_stroke (GtkSnapshot      *snapshot,
+                             GtkSnapshotState *state,
+                             GskRenderNode   **nodes,
+                             guint             n_nodes)
+{
+  GskRenderNode *node, *stroke_node;
+
+  node = gtk_snapshot_collect_default (snapshot, state, nodes, n_nodes);
+  if (node == NULL)
+    return NULL;
+
+  stroke_node = gsk_stroke_node_new (node,
+                                     state->data.stroke.path,
+                                     &state->data.stroke.stroke);
+
+  if (stroke_node->bounds.size.width == 0 ||
+      stroke_node->bounds.size.height == 0)
+    {
+      gsk_render_node_unref (node);
+      gsk_render_node_unref (stroke_node);
+      return NULL;
+    }
+
+  gsk_render_node_unref (node);
+
+  return stroke_node;
+}
+
+static void
+gtk_snapshot_clear_stroke (GtkSnapshotState *state)
+{
+  gsk_path_unref (state->data.stroke.path);
+  gsk_stroke_clear (&state->data.stroke.stroke);
+}
+
+/**
+ * gtk_snapshot_push_stroke:
+ * @snapshot: a #GtkSnapshot
+ * @path: The path to stroke
+ * @stroke: The stroke attributes
+ *
+ * Strokes the given @path with the attributes given by @stroke and
+ * an image.
+ *
+ * The image is recorded until the next call to [method@Gtk.Snapshot.pop].
+ *
+ * Note that the strokes are subject to the same transformation as
+ * everything else, so uneven scaling will cause horizontal and vertical
+ * strokes to have different widths.
+ *
+ * If you want to stroke the path with a color, [method@Gtk.Snapshot.append_stroke]
+ * may be more convenient.
+ *
+ * Since: 4.14
+ */
+void
+gtk_snapshot_push_stroke (GtkSnapshot     *snapshot,
+                          GskPath         *path,
+                          const GskStroke *stroke)
+{
+  GtkSnapshotState *state;
+
+  gtk_snapshot_ensure_identity (snapshot);
+
+  state = gtk_snapshot_push_state (snapshot,
+                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   gtk_snapshot_collect_stroke,
+                                   gtk_snapshot_clear_stroke);
+
+  state->data.stroke.path = gsk_path_ref (path);
+  gsk_stroke_init_copy (&state->data.stroke.stroke, stroke);
+}
+
+static GskRenderNode *
 gtk_snapshot_collect_shadow (GtkSnapshot      *snapshot,
                              GtkSnapshotState *state,
                              GskRenderNode   **nodes,
@@ -1117,6 +1298,35 @@ gtk_snapshot_collect_shadow (GtkSnapshot      *snapshot,
   gsk_render_node_unref (node);
 
   return shadow_node;
+}
+
+/**
+ * gtk_snapshot_append_stroke:
+ * @snapshot: a `GtkSnapshot`
+ * @path: The path describing the area to fill
+ * @stroke: The stroke attributes
+ * @color: the color to fill the path with
+ *
+ * A convenience method to stroke a path with a color.
+ *
+ * See [method@Gtk.Snapshot.push_stroke] if you need
+ * to stroke a path with more complex content than
+ * a color.
+ *
+ * Since: 4.14
+ */
+void
+gtk_snapshot_append_stroke (GtkSnapshot     *snapshot,
+                            GskPath         *path,
+                            const GskStroke *stroke,
+                            const GdkRGBA   *color)
+{
+  graphene_rect_t bounds;
+
+  gsk_path_get_stroke_bounds (path, stroke, &bounds);
+  gtk_snapshot_push_stroke (snapshot, path, stroke);
+  gtk_snapshot_append_color (snapshot, color, &bounds);
+  gtk_snapshot_pop (snapshot);
 }
 
 static void

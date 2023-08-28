@@ -73,7 +73,10 @@ demos = files([
   'panes.c',
   'password_entry.c',
   'path_fill.c',
+  'path_maze.c',
+  'path_spinner.c',
   'path_walk.c',
+  'path_text.c',
   'peg_solitaire.c',
   'pickers.c',
   'printing.c',
@@ -138,6 +141,8 @@ extra_demo_sources = files([
   'unicode-names.c',
   'suggestionentry.c',
   'language-names.c',
+  'nodewidget.c',
+  'graphwidget.c',
 ])
 
 if os_unix

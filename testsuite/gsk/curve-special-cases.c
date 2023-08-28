@@ -92,6 +92,7 @@ static gboolean
 pathop_cb (GskPathOperation        op,
            const graphene_point_t *pts,
            gsize                   n_pts,
+           float                   weight,
            gpointer                user_data)
 {
   GskCurve *curve = user_data;
@@ -101,7 +102,7 @@ pathop_cb (GskPathOperation        op,
   if (op == GSK_PATH_MOVE)
     return TRUE;
 
-  gsk_curve_init_foreach (curve, op, pts, n_pts);
+  gsk_curve_init_foreach (curve, op, pts, n_pts, weight);
   return FALSE;
 }
 
@@ -145,6 +146,67 @@ test_curve_crossing (void)
     }
 }
 
+static void
+test_circle (void)
+{
+  GskCurve c;
+  graphene_vec2_t tangent, tangent2;
+
+  parse_curve (&c, "M 1 0 O 1 1 0 1 0.707107");
+
+  g_assert_true (c.op == GSK_PATH_CONIC);
+
+  g_assert_true (graphene_point_equal (gsk_curve_get_start_point (&c), &GRAPHENE_POINT_INIT (1, 0)));
+  g_assert_true (graphene_point_equal (gsk_curve_get_end_point (&c), &GRAPHENE_POINT_INIT (0, 1)));
+
+  gsk_curve_get_start_tangent (&c, &tangent);
+  g_assert_true (graphene_vec2_equal (&tangent, graphene_vec2_init (&tangent2, 0, 1)));
+
+  gsk_curve_get_end_tangent (&c, &tangent);
+  g_assert_true (graphene_vec2_equal (&tangent, graphene_vec2_init (&tangent2, -1, 0)));
+
+  g_assert_cmpfloat_with_epsilon (gsk_curve_get_length (&c), M_PI_2, 0.001);
+
+  for (int i = 1; i < 10; i++)
+    {
+      float t = i / 10.f;
+      float dist, t_out;
+
+      gsk_curve_get_closest_point (&c,
+                                   &GRAPHENE_POINT_INIT (cos (t * M_PI_2),
+                                                         sin (t * M_PI_2)),
+                                   INFINITY,
+                                   &dist,
+                                   &t_out);
+      g_assert_true (dist < 0.001);
+    }
+}
+
+static void
+test_curve_length (void)
+{
+  GskCurve c, c1, c2;
+  float l, l1, l2, l1a;
+
+  /* This curve is a bad case for our sampling, since it has
+   * a very sharp turn. gskcontour.c handles these better, by
+   * splitting at the curvature extrema.
+   *
+   * Here, we just bump our epsilon up high enough.
+   */
+  parse_curve (&c, "M 1462.632080 -1593.118896 C 751.533630 -74.179169 -914.280090 956.537720 -83.091866 207.213776");
+
+  gsk_curve_split (&c, 0.5, &c1, &c2);
+
+  l = gsk_curve_get_length (&c);
+  l1a = gsk_curve_get_length_to (&c, 0.5);
+  l1 = gsk_curve_get_length (&c1);
+  l2 = gsk_curve_get_length (&c2);
+
+  g_assert_cmpfloat_with_epsilon (l1, l1a, 0.1);
+  g_assert_cmpfloat_with_epsilon (l, l1 + l2, 0.62);
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -154,6 +216,8 @@ main (int   argc,
   g_test_add_func ("/curve/special/tangents", test_curve_tangents);
   g_test_add_func ("/curve/special/degenerate-tangents", test_curve_degenerate_tangents);
   g_test_add_func ("/curve/special/crossing", test_curve_crossing);
+  g_test_add_func ("/curve/special/circle", test_circle);
+  g_test_add_func ("/curve/special/length", test_curve_length);
 
   return g_test_run ();
 }

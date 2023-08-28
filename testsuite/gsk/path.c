@@ -22,7 +22,7 @@
 static GskPath *
 create_random_degenerate_path (guint max_contours)
 {
-#define N_DEGENERATE_PATHS 14
+#define N_DEGENERATE_PATHS 15
   GskPathBuilder *builder;
   guint i;
 
@@ -132,6 +132,14 @@ create_random_degenerate_path (guint max_contours)
       break;
 
     case 12:
+      /* circle with radius 0 */
+      gsk_path_builder_add_circle (builder,
+                                   &GRAPHENE_POINT_INIT (g_test_rand_double_range (-1000, 1000),
+                                                         g_test_rand_double_range (-1000, 1000)),
+                                   0);
+      break;
+
+    case 13:
       /* a zero-length line */
       {
         graphene_point_t point = GRAPHENE_POINT_INIT (g_test_rand_double_range (-1000, 1000),
@@ -141,7 +149,7 @@ create_random_degenerate_path (guint max_contours)
       }
       break;
 
-    case 13:
+    case 14:
       /* a cubic with start == end */
       {
         graphene_point_t point = GRAPHENE_POINT_INIT (g_test_rand_double_range (-1000, 1000),
@@ -225,7 +233,7 @@ add_standard_contour (GskPathBuilder *builder)
   n = g_test_rand_int_range (1, 20);
   for (i = 0; i < n; i++)
     {
-      switch (g_test_rand_int_range (0, 6))
+      switch (g_test_rand_int_range (0, 8))
       {
         case 0:
           gsk_path_builder_line_to (builder,
@@ -273,6 +281,24 @@ add_standard_contour (GskPathBuilder *builder)
                                          g_test_rand_double_range (-1000, 1000),
                                          g_test_rand_double_range (-1000, 1000),
                                          g_test_rand_double_range (-1000, 1000));
+          break;
+
+        case 6:
+          gsk_path_builder_conic_to (builder,
+                                     g_test_rand_double_range (-1000, 1000),
+                                     g_test_rand_double_range (-1000, 1000),
+                                     g_test_rand_double_range (-1000, 1000),
+                                     g_test_rand_double_range (-1000, 1000),
+                                     g_test_rand_double_range (0.2, 20));
+          break;
+
+        case 7:
+          gsk_path_builder_rel_conic_to (builder,
+                                         g_test_rand_double_range (-1000, 1000),
+                                         g_test_rand_double_range (-1000, 1000),
+                                         g_test_rand_double_range (-1000, 1000),
+                                         g_test_rand_double_range (-1000, 1000),
+                                         g_test_rand_double_range (0.2, 20));
           break;
 
         default:
@@ -371,6 +397,15 @@ path_operation_print (const PathOperation *p,
       _g_string_append_point (string, &p->pts[3]);
       break;
 
+    case GSK_PATH_CONIC:
+      g_string_append (string, " O ");
+      _g_string_append_point (string, &p->pts[1]);
+      g_string_append (string, ", ");
+      _g_string_append_point (string, &p->pts[3]);
+      g_string_append (string, ", ");
+      _g_string_append_double (string, p->pts[2].x);
+      break;
+
     default:
       g_assert_not_reached();
       return;
@@ -405,6 +440,10 @@ path_operation_equal (const PathOperation *p1,
             && graphene_point_near (&p1->pts[2], &p2->pts[2], epsilon)
             && graphene_point_near (&p1->pts[3], &p2->pts[3], epsilon);
 
+      case GSK_PATH_CONIC:
+        return graphene_point_near (&p1->pts[1], &p2->pts[1], epsilon)
+            && graphene_point_near (&p1->pts[3], &p2->pts[3], epsilon);
+
       default:
         g_return_val_if_reached (FALSE);
     }
@@ -414,6 +453,7 @@ static gboolean
 collect_path_operation_cb (GskPathOperation        op,
                            const graphene_point_t *pts,
                            gsize                   n_pts,
+                           float                   weight,
                            gpointer                user_data)
 {
   g_array_append_vals (user_data,
@@ -658,6 +698,7 @@ static gboolean
 rotate_path_cb (GskPathOperation        op,
                 const graphene_point_t *pts,
                 gsize                   n_pts,
+                float                   weight,
                 gpointer                user_data)
 {
   GskPathBuilder **builders = user_data;
@@ -687,6 +728,11 @@ rotate_path_cb (GskPathOperation        op,
     case GSK_PATH_CUBIC:
       gsk_path_builder_cubic_to (builders[0], pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y);
       gsk_path_builder_cubic_to (builders[1], pts[1].y, -pts[1].x, pts[2].y, -pts[2].x, pts[3].y, -pts[3].x);
+      break;
+
+    case GSK_PATH_CONIC:
+      gsk_path_builder_conic_to (builders[0], pts[1].x, pts[1].y, pts[2].x, pts[2].y, weight);
+      gsk_path_builder_conic_to (builders[1], pts[1].y, -pts[1].x, pts[2].y, -pts[2].x, weight);
       break;
 
     default:
@@ -727,7 +773,7 @@ test_in_fill_rotated (void)
           GskFillRule fill_rule = g_random_int_range (0, N_FILL_RULES);
           float x = g_test_rand_double_range (-1000, 1000);
           float y = g_test_rand_double_range (-1000, 1000);
-  
+
           g_assert_cmpint (gsk_path_in_fill (paths[0], &GRAPHENE_POINT_INIT (x, y), fill_rule),
                            ==,
                            gsk_path_in_fill (paths[1], &GRAPHENE_POINT_INIT (y, -x), fill_rule));
@@ -742,6 +788,199 @@ test_in_fill_rotated (void)
 #undef N_FILL_RULES
 }
 
+static void
+test_split (void)
+{
+  GskPath *path, *path1, *path2;
+  GskPathMeasure *measure, *measure1, *measure2;
+  float length, length1, length2;
+  GskPathBuilder *builder;
+  float split, epsilon;
+  GskPathPoint point0, point1, point2;
+  float tolerance = 0.5;
+
+  for (int i = 0; i < 100; i++)
+    {
+      if (g_test_verbose ())
+        g_test_message ("path %u", i);
+
+      path = create_random_path (1);
+      measure = gsk_path_measure_new_with_tolerance (path, tolerance);
+
+      length = gsk_path_measure_get_length (measure);
+      /* chosen high enough to stop the testsuite from failing */
+      epsilon = MAX (length / 250, 1.f / 1024);
+
+      split = g_test_rand_double_range (0, length);
+
+      if (!gsk_path_get_start_point (path, &point0) ||
+          !gsk_path_measure_get_point (measure, split, &point1) ||
+          !gsk_path_get_end_point (path, &point2))
+        {
+          gsk_path_unref (path);
+          gsk_path_measure_unref (measure);
+          continue;
+        }
+
+      if (gsk_path_point_equal (&point0, &point1) ||
+          gsk_path_point_equal (&point1, &point2))
+        {
+          gsk_path_unref (path);
+          gsk_path_measure_unref (measure);
+          continue;
+        }
+
+      g_assert_true (gsk_path_point_compare (&point0, &point1) < 0);
+      g_assert_true (gsk_path_point_compare (&point1, &point2) < 0);
+
+      builder = gsk_path_builder_new ();
+      gsk_path_builder_add_segment (builder, path, &point0, &point1);
+      path1 = gsk_path_builder_free_to_path (builder);
+      measure1 = gsk_path_measure_new_with_tolerance (path1, tolerance);
+      length1 = gsk_path_measure_get_length (measure1);
+
+      builder = gsk_path_builder_new ();
+      gsk_path_builder_add_segment (builder, path, &point1, &point2);
+      path2 = gsk_path_builder_free_to_path (builder);
+      measure2 = gsk_path_measure_new_with_tolerance (path2, tolerance);
+      length2 = gsk_path_measure_get_length (measure2);
+
+      g_assert_cmpfloat_with_epsilon (length, length1 + length2, epsilon);
+
+      gsk_path_unref (path2);
+      gsk_path_unref (path1);
+      gsk_path_unref (path);
+
+      gsk_path_measure_unref (measure2);
+      gsk_path_measure_unref (measure1);
+      gsk_path_measure_unref (measure);
+    }
+}
+
+static void
+test_roundtrip (void)
+{
+  GskPath *path;
+  GskPathMeasure *measure;
+  float length;
+  float split, epsilon;
+  GskPathPoint point;
+  float distance;
+  float tolerance = 0.5;
+
+  for (int i = 0; i < 100; i++)
+    {
+      if (g_test_verbose ())
+        g_test_message ("path %u", i);
+
+      path = create_random_path (1);
+      measure = gsk_path_measure_new_with_tolerance (path, tolerance);
+
+      length = gsk_path_measure_get_length (measure);
+      /* chosen high enough to stop the testsuite from failing */
+      epsilon = MAX (length / 1000, 1.f / 1024);
+
+      split = g_test_rand_double_range (0, length);
+
+      if (!gsk_path_measure_get_point (measure, split, &point))
+        {
+          gsk_path_unref (path);
+          gsk_path_measure_unref (measure);
+          continue;
+        }
+
+      distance = gsk_path_point_get_distance (&point, measure);
+
+      g_assert_cmpfloat_with_epsilon (split, distance, epsilon);
+
+      gsk_path_unref (path);
+      gsk_path_measure_unref (measure);
+    }
+}
+
+static void
+test_segment (void)
+{
+  GskPath *path, *path1, *path2, *path3;
+  GskPathMeasure *measure, *measure1, *measure2, *measure3;
+  GskPathPoint point0, point1, point2, point3;
+  float length, length1, length2, length3;
+  GskPathBuilder *builder;
+  float split1, split2, epsilon;
+  float tolerance = 0.5;
+
+  for (int i = 0; i < 100; i++)
+    {
+      if (g_test_verbose ())
+        g_test_message ("path %u", i);
+
+      path = create_random_path (G_MAXUINT);
+      measure = gsk_path_measure_new_with_tolerance (path, tolerance);
+      length = gsk_path_measure_get_length (measure);
+
+      /* We are accumulating both the split error and the roundtrip error
+       * here (on both ends, for the middle segment). So we should expect
+       * the epsilon here to be at least 4 times the epsilon we can use
+       * in the split and roundtrip tests.
+       */
+      epsilon = MAX (length / 200, 1.f / 1024);
+
+      split1 = g_test_rand_double_range (0, length);
+      split2 = g_test_rand_double_range (split1, length);
+
+      if (!gsk_path_get_start_point (path, &point0) ||
+          !gsk_path_measure_get_point (measure, split1, &point1) ||
+          !gsk_path_measure_get_point (measure, split2, &point2) ||
+          !gsk_path_get_end_point (path, &point3))
+        {
+          gsk_path_unref (path);
+          gsk_path_measure_unref (measure);
+          continue;
+        }
+
+      if (gsk_path_point_equal (&point0, &point1) ||
+          gsk_path_point_equal (&point1, &point2) ||
+          gsk_path_point_equal (&point2, &point3))
+        {
+          gsk_path_unref (path);
+          gsk_path_measure_unref (measure);
+          continue;
+        }
+
+      builder = gsk_path_builder_new ();
+      gsk_path_builder_add_segment (builder, path, &point0, &point1);
+      path1 = gsk_path_builder_free_to_path (builder);
+      measure1 = gsk_path_measure_new_with_tolerance (path1, tolerance);
+      length1 = gsk_path_measure_get_length (measure1);
+
+      builder = gsk_path_builder_new ();
+      gsk_path_builder_add_segment (builder, path, &point1, &point2);
+      path2 = gsk_path_builder_free_to_path (builder);
+      measure2 = gsk_path_measure_new_with_tolerance (path2, tolerance);
+      length2 = gsk_path_measure_get_length (measure2);
+
+      builder = gsk_path_builder_new ();
+      gsk_path_builder_add_segment (builder, path, &point2, &point3);
+      path3 = gsk_path_builder_free_to_path (builder);
+      measure3 = gsk_path_measure_new_with_tolerance (path3, tolerance);
+      length3 = gsk_path_measure_get_length (measure3);
+
+      g_assert_cmpfloat_with_epsilon (split1, length1, epsilon);
+      g_assert_cmpfloat_with_epsilon (split2, length1 + length2, epsilon);
+      g_assert_cmpfloat_with_epsilon (length, length1 + length2 + length3, epsilon);
+
+      gsk_path_unref (path3);
+      gsk_path_unref (path2);
+      gsk_path_unref (path1);
+      gsk_path_unref (path);
+
+      gsk_path_measure_unref (measure3);
+      gsk_path_measure_unref (measure2);
+      gsk_path_measure_unref (measure1);
+      gsk_path_measure_unref (measure);
+    }
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -752,6 +991,9 @@ main (int   argc,
   g_test_add_func ("/path/parse", test_parse);
   g_test_add_func ("/path/in-fill-union", test_in_fill_union);
   g_test_add_func ("/path/in-fill-rotated", test_in_fill_rotated);
+  g_test_add_func ("/path/measure/split", test_split);
+  g_test_add_func ("/path/measure/roundtrip", test_roundtrip);
+  g_test_add_func ("/path/measure/segment", test_segment);
 
   return g_test_run ();
 }

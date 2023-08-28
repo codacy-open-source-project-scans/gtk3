@@ -34,9 +34,14 @@ typedef struct _GskPathPoint GskPathPoint;
 struct _GskPathPoint {
   /*< private >*/
   union {
-    float f[8];
-    gpointer p[8];
-  } data;
+    struct {
+      gsize contour;
+      gsize idx;
+      float t;
+    };
+    gpointer padding[8];
+    graphene_vec4_t alignment;
+  };
 };
 
 GDK_AVAILABLE_IN_4_14
@@ -68,14 +73,18 @@ void                    gsk_path_point_get_tangent     (const GskPathPoint *poin
                                                         graphene_vec2_t    *tangent);
 
 GDK_AVAILABLE_IN_4_14
-float                   gsk_path_point_get_rotation    (const GskPathPoint     *point,
-                                                        GskPath                *path,
-                                                        GskPathDirection        direction);
+float                   gsk_path_point_get_rotation    (const GskPathPoint *point,
+                                                        GskPath            *path,
+                                                        GskPathDirection    direction);
 
 GDK_AVAILABLE_IN_4_14
 float                   gsk_path_point_get_curvature   (const GskPathPoint *point,
                                                         GskPath            *path,
+                                                        GskPathDirection    direction,
                                                         graphene_point_t   *center);
 
+GDK_AVAILABLE_IN_4_14
+float                   gsk_path_point_get_distance    (const GskPathPoint *point,
+                                                        GskPathMeasure     *measure);
 
 G_END_DECLS

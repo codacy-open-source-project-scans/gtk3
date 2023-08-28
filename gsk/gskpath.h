@@ -33,14 +33,15 @@ G_BEGIN_DECLS
  * @GSK_PATH_FOREACH_ALLOW_ONLY_LINES: The default behavior, only allow lines.
  * @GSK_PATH_FOREACH_ALLOW_QUAD: Allow emission of `GSK_PATH_QUAD` operations
  * @GSK_PATH_FOREACH_ALLOW_CUBIC: Allow emission of `GSK_PATH_CUBIC` operations.
- * @GSK_PATH_FOREACH_ALLOW_ANY: Allow emission of any kind of operation.
+ * @GSK_PATH_FOREACH_ALLOW_CONIC: Allow emission of `GSK_PATH_CONIC` operations.
  *
- * Flags that can be passed to gsk_path_foreach() to enable additional
- * features.
+ * Flags that can be passed to gsk_path_foreach() to influence what
+ * kinds of operations the path is decomposed into.
  *
- * By default, [method@Gsk.Path.foreach] will only emit a path with all operations
- * flattened to straight lines to allow for maximum compatibility. The only
- * operations emitted will be `GSK_PATH_MOVE`, `GSK_PATH_LINE` and `GSK_PATH_CLOSE`.
+ * By default, [method@Gsk.Path.foreach] will only emit a path with all
+ * operations flattened to straight lines to allow for maximum compatibility.
+ * The only operations emitted will be `GSK_PATH_MOVE`, `GSK_PATH_LINE` and
+ * `GSK_PATH_CLOSE`.
  *
  * Since: 4.14
  */
@@ -49,24 +50,35 @@ typedef enum
   GSK_PATH_FOREACH_ALLOW_ONLY_LINES = 0,
   GSK_PATH_FOREACH_ALLOW_QUAD       = (1 << 0),
   GSK_PATH_FOREACH_ALLOW_CUBIC      = (1 << 1),
+  GSK_PATH_FOREACH_ALLOW_CONIC      = (1 << 2),
 } GskPathForeachFlags;
 
 /**
  * GskPathForeachFunc:
- * @op: The operation to perform
+ * @op: The operation
  * @pts: The points of the operation
  * @n_pts: The number of points
+ * @weight: The weight for conic curves, or unused if not a conic curve
  * @user_data: The user data provided with the function
  *
- * Prototype of the callback to iterate throught the operations of
+ * Prototype of the callback to iterate through the operations of
  * a path.
  *
- * Returns: %TRUE to continue evaluating the path, %FALSE to
+ * For each operation, the callback is given the @op itself, the points
+ * that the operation is applied to in @pts, and a @weight for conic
+ * curves. The @n_pts argument is somewhat redundant, since the number
+ * of points can be inferred from the operation.
+ *
+ * Each contour of the path starts with a @GSK_PATH_MOVE operation.
+ * Closed contours end with a @GSK_PATH_CLOSE operation.
+ *
+ * Returns: %TRUE to continue iterating the path, %FALSE to
  *   immediately abort and not call the function again.
  */
 typedef gboolean (* GskPathForeachFunc) (GskPathOperation        op,
                                          const graphene_point_t *pts,
                                          gsize                   n_pts,
+                                         float                   weight,
                                          gpointer                user_data);
 
 #define GSK_TYPE_PATH (gsk_path_get_type ())

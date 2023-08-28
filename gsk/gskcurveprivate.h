@@ -33,6 +33,7 @@ typedef union _GskCurve GskCurve;
 typedef struct _GskLineCurve GskLineCurve;
 typedef struct _GskQuadCurve GskQuadCurve;
 typedef struct _GskCubicCurve GskCubicCurve;
+typedef struct _GskConicCurve GskConicCurve;
 
 struct _GskLineCurve
 {
@@ -65,12 +66,28 @@ struct _GskCubicCurve
   graphene_point_t coeffs[4];
 };
 
+struct _GskConicCurve
+{
+  GskPathOperation op;
+
+  gboolean has_coefficients;
+
+  /* points[0], points[1], points[3] are the control points,
+   * points[2].x is the weight
+   */
+  graphene_point_t points[4];
+
+  graphene_point_t num[3];
+  graphene_point_t denom[3];
+};
+
 union _GskCurve
 {
   GskPathOperation op;
   GskLineCurve line;
   GskQuadCurve quad;
   GskCubicCurve cubic;
+  GskConicCurve conic;
 };
 
 typedef enum {
@@ -88,6 +105,7 @@ typedef gboolean (* GskCurveAddLineFunc) (const graphene_point_t *from,
 typedef gboolean (* GskCurveAddCurveFunc) (GskPathOperation        op,
                                            const graphene_point_t *pts,
                                            gsize                   n_pts,
+                                           float                   weight,
                                            gpointer                user_data);
 
 void                    gsk_curve_init                          (GskCurve               *curve,
@@ -95,7 +113,8 @@ void                    gsk_curve_init                          (GskCurve       
 void                    gsk_curve_init_foreach                  (GskCurve               *curve,
                                                                  GskPathOperation        op,
                                                                  const graphene_point_t *pts,
-                                                                 gsize                   n_pts);
+                                                                 gsize                   n_pts,
+                                                                 float                   weight);
 
 void                    gsk_curve_print                         (const GskCurve         *curve,
                                                                  GString                *string);
@@ -145,6 +164,9 @@ void                    gsk_curve_get_bounds                    (const GskCurve 
 void                    gsk_curve_get_tight_bounds              (const GskCurve         *curve,
                                                                  GskBoundingBox         *bounds);
 
+void                    gsk_curve_get_derivative_at             (const GskCurve         *curve,
+                                                                 float                   t,
+                                                                 graphene_point_t       *value);
 int                     gsk_curve_get_crossing                  (const GskCurve         *curve,
                                                                  const graphene_point_t *point);
 gboolean                gsk_curve_get_closest_point             (const GskCurve         *curve,
@@ -152,6 +174,16 @@ gboolean                gsk_curve_get_closest_point             (const GskCurve 
                                                                  float                   threshold,
                                                                  float                  *out_dist,
                                                                  float                  *out_t);
+float                  gsk_curve_get_length                     (const GskCurve         *curve);
+float                  gsk_curve_get_length_to                  (const GskCurve         *curve,
+                                                                 float                   t);
+float                  gsk_curve_at_length                      (const GskCurve         *curve,
+                                                                 float                   distance,
+                                                                 float                   epsilon);
+
+int                    gsk_curve_get_curvature_points           (const GskCurve *        curve,
+                                                                 float                   t[3]);
+
 
 G_END_DECLS
 

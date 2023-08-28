@@ -31,12 +31,14 @@ typedef struct
   int lines;
   int quads;
   int cubics;
+  int conics;
 } Statistics;
 
 static gboolean
 stats_cb (GskPathOperation        op,
           const graphene_point_t *pts,
           gsize                   n_pts,
+          float                   weight,
           gpointer                user_data)
 {
   Statistics *stats = user_data;
@@ -58,6 +60,9 @@ stats_cb (GskPathOperation        op,
     case GSK_PATH_CUBIC:
       stats->cubics++;
       break;
+    case GSK_PATH_CONIC:
+      stats->conics++;
+      break;
     default:
       g_assert_not_reached ();
     }
@@ -69,12 +74,7 @@ static void
 collect_statistics (GskPath    *path,
                     Statistics *stats)
 {
-  stats->contours = 0;
-  stats->ops = 0;
-  stats->lines = 0;
-  stats->quads = 0;
-  stats->cubics = 0;
-
+  memset (stats, 0, sizeof (Statistics));
   gsk_path_foreach (path, -1, stats_cb, stats);
 }
 
@@ -89,6 +89,7 @@ do_info (int *argc, const char ***argv)
     { NULL, },
   };
   GskPath *path;
+  GskPathMeasure *measure;
   graphene_rect_t bounds;
 
   g_set_prgname ("gtk4-path-tool info");
@@ -114,6 +115,7 @@ do_info (int *argc, const char ***argv)
     }
 
   path = get_path (args[0]);
+  measure = gsk_path_measure_new (path);
 
   if (gsk_path_is_empty (path))
     g_print ("%s\n", _("Path is empty."));
@@ -123,6 +125,8 @@ do_info (int *argc, const char ***argv)
 
       if (gsk_path_is_closed (path))
         g_print ("%s\n", _("Path is closed"));
+
+      g_print ("%s %g\n", _("Path length"), gsk_path_measure_get_length (measure));
 
       if (gsk_path_get_bounds (path, &bounds))
         g_print ("%s: %g %g %g %g\n", _("Bounds"),
@@ -148,6 +152,11 @@ do_info (int *argc, const char ***argv)
       if (stats.cubics)
         {
           g_print (_("%d cubics"), stats.cubics);
+          g_print ("\n");
+        }
+      if (stats.conics)
+        {
+          g_print (_("%d conics"), stats.conics);
           g_print ("\n");
         }
     }

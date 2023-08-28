@@ -15,6 +15,7 @@ SYNOPSIS
 |   **gtk4-path-tool** decompose [OPTIONS...] <PATH>
 |   **gtk4-path-tool** show [OPTIONS...] <PATH>
 |   **gtk4-path-tool** render [OPTIONS...] <PATH>
+|   **gtk4-path-tool** reverse [OPTIONS...] <PATH>
 |   **gtk4-path-tool** info [OPTIONS...] <PATH>
 
 DESCRIPTION
@@ -44,6 +45,10 @@ segments.
 
   Allow cubic Bézier curves to be used in the generated path.
 
+``--allow-conic``
+
+  Allow conic Bézier curves to be used in the generated path.
+
 Showing
 ^^^^^^^
 
@@ -64,6 +69,10 @@ of the path is filled.
 
   The color that is used to render the background behind the path.
   If not specified, white is used.
+
+``--fill``
+
+  Fill the path (this is the default).
 
 ``--stroke``
 
@@ -130,6 +139,10 @@ The interior of the path is filled.
   The file to save the PNG image to.
   If not specified, "path.png" is used.
 
+``--fill``
+
+  Fill the path (this is the default).
+
 ``--stroke``
 
   Stroke the path instead of filling it.
@@ -168,6 +181,12 @@ The interior of the path is filled.
 
   The offset into the dash pattern where dashing should begin.
   The default value is 0.
+
+Reversing
+^^^^^^^^^
+
+The ``reverse`` command changes the direction of the path. The resulting
+paths starts where the original path ends.
 
 Info
 ^^^^

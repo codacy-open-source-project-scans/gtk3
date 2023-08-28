@@ -48,6 +48,19 @@ init_random_curve_with_op (GskCurve         *curve,
       }
     break;
 
+    case GSK_PATH_CONIC:
+      {
+        graphene_point_t p[4];
+
+        init_random_point (&p[0]);
+        init_random_point (&p[1]);
+        p[2].x = g_test_rand_double_range (0.2, 20);
+        p[2].y = 0.f;
+        init_random_point (&p[3]);
+        gsk_curve_init (curve, gsk_pathop_encode (GSK_PATH_CONIC, p));
+      }
+    break;
+
     default:
       g_assert_not_reached ();
     }
@@ -56,7 +69,7 @@ init_random_curve_with_op (GskCurve         *curve,
 static void
 init_random_curve (GskCurve *curve)
 {
-  init_random_curve_with_op (curve, GSK_PATH_LINE, GSK_PATH_CUBIC);
+  init_random_curve_with_op (curve, GSK_PATH_LINE, GSK_PATH_CONIC);
 }
 
 static void
@@ -93,11 +106,13 @@ test_curve_points (void)
 
       init_random_curve (&c);
 
-      /* We can assert equality here because evaluating the polynomials with 0
-       * has no effect on accuracy.
+      /* We could assert equality here because evaluating the polynomials with 0
+       * has no effect on accuracy, but for arcs, we use trigonometric functions,
+       * so allow a small error.
        */
       gsk_curve_get_point (&c, 0, &p);
-      g_assert_true (graphene_point_equal (gsk_curve_get_start_point (&c), &p));
+      g_assert_true (graphene_point_near (gsk_curve_get_start_point (&c), &p, 0.001));
+
       /* But here we evaluate the polynomials with 1 which gives the highest possible
        * accuracy error. So we'll just be generous here.
        */
@@ -182,8 +197,8 @@ test_curve_decompose (void)
                   gsk_curve_get_point (&c, (pol->t + last->t) / 2, &p);
                   /* The decomposer does this cheaper Manhattan distance test,
                    * so graphene_point_near() does not work */
-                  g_assert_cmpfloat (fabs (mid.x - p.x), <=, tolerance);
-                  g_assert_cmpfloat (fabs (mid.y - p.y), <=, tolerance);
+                  g_assert_cmpfloat (fabs (mid.x - p.x), <=, tolerance + 0.0002);
+                  g_assert_cmpfloat (fabs (mid.y - p.y), <=, tolerance + 0.0002);
                 }
             }
         }
@@ -196,12 +211,13 @@ static gboolean
 add_curve_to_array (GskPathOperation        op,
                     const graphene_point_t *pts,
                     gsize                   n_pts,
+                    float                   weight,
                     gpointer                user_data)
 {
   GArray *array = user_data;
   GskCurve c;
 
-  gsk_curve_init_foreach (&c, op, pts, n_pts);
+  gsk_curve_init_foreach (&c, op, pts, n_pts, weight);
   g_array_append_val (array, c);
 
   return TRUE;
@@ -249,6 +265,9 @@ test_curve_decompose_into (GskPathForeachFlags flags)
             case GSK_PATH_CUBIC:
               g_assert_true (flags & GSK_PATH_FOREACH_ALLOW_CUBIC);
               break;
+            case GSK_PATH_CONIC:
+              g_assert_true (flags & GSK_PATH_FOREACH_ALLOW_CONIC);
+              break;
             default:
               g_assert_not_reached ();
             }
@@ -281,42 +300,100 @@ test_curve_decompose_into_cubic (void)
 static void
 test_curve_split (void)
 {
-  for (int i = 0; i < 100; i++)
+  for (int i = 0; i < 20; i++)
     {
       GskCurve c;
-      GskCurve c1, c2;
-      graphene_point_t p;
-      graphene_vec2_t t, t1, t2;
 
       init_random_curve (&c);
 
-      gsk_curve_split (&c, 0.5, &c1, &c2);
+      for (int j = 0; j < 20; j++)
+        {
+          GskCurve c1, c2;
+          graphene_point_t p;
+          graphene_vec2_t t, t1, t2;
+          float split;
 
-      g_assert_true (c1.op == c.op);
-      g_assert_true (c2.op == c.op);
+          split = g_test_rand_double_range (0.1, 0.9);
 
-      g_assert_true (graphene_point_near (gsk_curve_get_start_point (&c),
-                                          gsk_curve_get_start_point (&c1), 0.005));
-      g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c1),
-                                          gsk_curve_get_start_point (&c2), 0.005));
-      g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c),
-                                          gsk_curve_get_end_point (&c2), 0.005));
-      gsk_curve_get_point (&c, 0.5, &p);
-      gsk_curve_get_tangent (&c, 0.5, &t);
-      g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c1), &p, 0.005));
-      g_assert_true (graphene_point_near (gsk_curve_get_start_point (&c2), &p, 0.005));
+          gsk_curve_split (&c, split, &c1, &c2);
 
-      gsk_curve_get_start_tangent (&c, &t1);
-      gsk_curve_get_start_tangent (&c1, &t2);
-      g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
-      gsk_curve_get_end_tangent (&c1, &t1);
-      gsk_curve_get_start_tangent (&c2, &t2);
-      g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
-      g_assert_true (graphene_vec2_near (&t, &t1, 0.005));
-      g_assert_true (graphene_vec2_near (&t, &t2, 0.005));
-      gsk_curve_get_end_tangent (&c, &t1);
-      gsk_curve_get_end_tangent (&c2, &t2);
-      g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
+          g_assert_true (c1.op == c.op);
+          g_assert_true (c2.op == c.op);
+
+          g_assert_true (graphene_point_near (gsk_curve_get_start_point (&c),
+                                              gsk_curve_get_start_point (&c1), 0.005));
+          g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c1),
+                                              gsk_curve_get_start_point (&c2), 0.005));
+          g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c),
+                                              gsk_curve_get_end_point (&c2), 0.005));
+          gsk_curve_get_point (&c, split, &p);
+          gsk_curve_get_tangent (&c, split, &t);
+          g_assert_true (graphene_point_near (gsk_curve_get_end_point (&c1), &p, 0.005));
+          g_assert_true (graphene_point_near (gsk_curve_get_start_point (&c2), &p, 0.005));
+
+          gsk_curve_get_start_tangent (&c, &t1);
+          gsk_curve_get_start_tangent (&c1, &t2);
+          g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
+          gsk_curve_get_end_tangent (&c1, &t1);
+          gsk_curve_get_start_tangent (&c2, &t2);
+          g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
+          g_assert_true (graphene_vec2_near (&t, &t1, 0.005));
+          g_assert_true (graphene_vec2_near (&t, &t2, 0.005));
+          gsk_curve_get_end_tangent (&c, &t1);
+          gsk_curve_get_end_tangent (&c2, &t2);
+          g_assert_true (graphene_vec2_near (&t1, &t2, 0.005));
+
+#if 0
+          /* hard to guarantee this for totally random random curves */
+          g_assert_cmpfloat_with_epsilon (gsk_curve_get_length (&c),
+                                          gsk_curve_get_length (&c1) + gsk_curve_get_length (&c2),
+                                          1);
+#endif
+        }
+    }
+}
+
+static void
+test_curve_derivative (void)
+{
+  GskCurve c;
+  float t;
+  graphene_vec2_t t1, t2;
+  graphene_point_t p;
+
+  for (int i = 0; i < 100; i++)
+    {
+      init_random_curve (&c);
+
+      for (int j = 0; j < 100; j++)
+        {
+          t = g_test_rand_double_range (0, 1);
+          gsk_curve_get_derivative_at (&c, t, &p);
+          gsk_curve_get_tangent (&c, t, &t1);
+          graphene_vec2_init (&t2, p.x, p.y);
+          graphene_vec2_normalize (&t2, &t2);
+          g_assert_true (graphene_vec2_near (&t1, &t2, 0.1));
+        }
+    }
+}
+
+static void
+test_curve_length (void)
+{
+  GskCurve c;
+  float l, l0;
+
+  for (int i = 0; i < 1000; i++)
+    {
+      init_random_curve (&c);
+
+      l = gsk_curve_get_length (&c);
+      l0 = graphene_point_distance (gsk_curve_get_start_point (&c),
+                                    gsk_curve_get_end_point (&c),
+                                    NULL, NULL);
+      g_assert_true (l >= l0 - 0.001);
+      if (c.op == GSK_PATH_LINE)
+        g_assert_cmpfloat_with_epsilon (l, l0, 0.001);
     }
 }
 
@@ -328,10 +405,12 @@ main (int argc, char *argv[])
   g_test_add_func ("/curve/points", test_curve_points);
   g_test_add_func ("/curve/tangents", test_curve_tangents);
   g_test_add_func ("/curve/decompose", test_curve_decompose);
-  g_test_add_func ("/curve/decompose/into/line", test_curve_decompose_into_line);
-  g_test_add_func ("/curve/decompose/into/quad", test_curve_decompose_into_quad);
-  g_test_add_func ("/curve/decompose/into/cubic", test_curve_decompose_into_cubic);
+  g_test_add_func ("/curve/decompose-line", test_curve_decompose_into_line);
+  g_test_add_func ("/curve/decompose-quad", test_curve_decompose_into_quad);
+  g_test_add_func ("/curve/decompose-cubic", test_curve_decompose_into_cubic);
   g_test_add_func ("/curve/split", test_curve_split);
+  g_test_add_func ("/curve/derivative", test_curve_derivative);
+  g_test_add_func ("/curve/length", test_curve_length);
 
   return g_test_run ();
 }

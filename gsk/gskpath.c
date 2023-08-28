@@ -23,8 +23,8 @@
 
 #include "gskcurveprivate.h"
 #include "gskpathbuilder.h"
-#include "gskpathpointprivate.h"
-#include "gsksplineprivate.h"
+#include "gskpathpoint.h"
+#include "gskcontourprivate.h"
 
 /**
  * GskPath:
@@ -177,8 +177,9 @@ gsk_path_get_flags (const GskPath *self)
  * Converts @self into a human-readable string representation suitable
  * for printing.
  *
- * The string is compatible with
- * [SVG path syntax](https://www.w3.org/TR/SVG11/paths.html#PathData).
+ * The string is compatible with (a superset of)
+ * [SVG path syntax](https://www.w3.org/TR/SVG11/paths.html#PathData),
+ * see [func@Gsk.Path.parse] for a summary of the syntax.
  *
  * Since: 4.14
  */
@@ -233,6 +234,7 @@ static gboolean
 gsk_path_to_cairo_add_op (GskPathOperation        op,
                           const graphene_point_t *pts,
                           gsize                   n_pts,
+                          float                   weight,
                           gpointer                cr)
 {
   switch (op)
@@ -249,21 +251,12 @@ gsk_path_to_cairo_add_op (GskPathOperation        op,
       cairo_line_to (cr, pts[1].x, pts[1].y);
       break;
 
-    case GSK_PATH_QUAD:
-      {
-        double x, y;
-        cairo_get_current_point (cr, &x, &y);
-        cairo_curve_to (cr,
-                        1/3.f * x + 2/3.f * pts[1].x, 1/3.f * y + 2/3.f * pts[1].y,
-                        2/3.f * pts[1].x + 1/3.f * pts[2].x, 2/3.f * pts[1].y + 1/3.f * pts[2].y,
-                        pts[2].x, pts[2].y);
-      }
-      break;
-
     case GSK_PATH_CUBIC:
       cairo_curve_to (cr, pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y);
       break;
 
+    case GSK_PATH_QUAD:
+    case GSK_PATH_CONIC:
     default:
       g_assert_not_reached ();
       return FALSE;
@@ -375,7 +368,7 @@ gsk_path_is_closed (GskPath *self)
  * If the path is empty, `FALSE` is returned and @bounds are set to
  * graphene_rect_zero(). This is different from the case where the path
  * is a single point at the origin, where the @bounds will also be set to
- * the zero rectangle but 0 will be returned.
+ * the zero rectangle but `TRUE` will be returned.
  *
  * Returns: `TRUE` if the path has bounds, `FALSE` if the path is known
  *   to be empty and have no bounds.
@@ -428,6 +421,7 @@ gsk_path_get_bounds (GskPath         *self,
  *
  * Returns: `TRUE` if the path has bounds, `FALSE` if the path is known
  *   to be empty and have no bounds.
+ *
  * Since: 4.14
  */
 gboolean
@@ -517,17 +511,19 @@ gboolean
 gsk_path_get_start_point (GskPath      *self,
                           GskPathPoint *result)
 {
-  GskRealPathPoint *res = (GskRealPathPoint *) result;
-
   g_return_val_if_fail (self != NULL, FALSE);
   g_return_val_if_fail (result != NULL, FALSE);
 
   if (self->n_contours == 0)
     return FALSE;
 
-  res->contour = 0;
-  res->idx = 1;
-  res->t = 0;
+  /* Conceptually, there is always a move at the
+   * beginning, which jumps from where to the start
+   * point of the contour, so we use idx == 1 here.
+   */
+  result->contour = 0;
+  result->idx = 1;
+  result->t = 0;
 
   return TRUE;
 }
@@ -550,17 +546,15 @@ gboolean
 gsk_path_get_end_point (GskPath      *self,
                         GskPathPoint *result)
 {
-  GskRealPathPoint *res = (GskRealPathPoint *) result;
-
   g_return_val_if_fail (self != NULL, FALSE);
   g_return_val_if_fail (result != NULL, FALSE);
 
   if (self->n_contours == 0)
     return FALSE;
 
-  res->contour = self->n_contours - 1;
-  res->idx = gsk_contour_get_n_points (self->contours[self->n_contours - 1]) - 1;
-  res->t = 1;
+  result->contour = self->n_contours - 1;
+  result->idx = gsk_contour_get_n_ops (self->contours[self->n_contours - 1]) - 1;
+  result->t = 1;
 
   return TRUE;
 }
@@ -589,7 +583,6 @@ gsk_path_get_closest_point (GskPath                *self,
                             float                   threshold,
                             GskPathPoint           *result)
 {
-  GskRealPathPoint *res = (GskRealPathPoint *) result;
   gboolean found;
 
   g_return_val_if_fail (self != NULL, FALSE);
@@ -603,10 +596,11 @@ gsk_path_get_closest_point (GskPath                *self,
     {
       float distance;
 
-      if (gsk_contour_get_closest_point (self->contours[i], point, threshold, res, &distance))
+      if (gsk_contour_get_closest_point (self->contours[i], point, threshold, result, &distance))
         {
           found = TRUE;
-          res->contour = i;
+          g_assert (0 <= result->t && result->t <= 1);
+          result->contour = i;
           threshold = distance;
         }
     }
@@ -624,10 +618,17 @@ gsk_path_get_closest_point (GskPath                *self,
  *
  * Calls @func for every operation of the path.
  *
- * Note that this only approximates @self, because paths can contain
- * optimizations for various specialized contours, and depending on
- * the @flags, the path may be decomposed into simpler curves than
- * the ones that it contained originally.
+ * Note that this may only approximate @self, because paths can contain
+ * optimizations for various specialized contours, and depending on the
+ * @flags, the path may be decomposed into simpler curves than the ones
+ * that it contained originally.
+ *
+ * This function serves two purposes:
+ *
+ * - When the @flags allow everything, it provides access to the raw,
+ *   unmodified data of the path.
+ * - When the @flags disallow certain operations, it provides
+ *   an approximation of the path using just the allowed operations.
  *
  * Returns: `FALSE` if @func returned FALSE`, `TRUE` otherwise.
  *
@@ -671,6 +672,7 @@ gsk_path_foreach_trampoline_add_line (const graphene_point_t *from,
   return trampoline->func (GSK_PATH_LINE,
                            (graphene_point_t[2]) { *from, *to },
                            2,
+                           0.f,
                            trampoline->user_data);
 }
 
@@ -678,17 +680,19 @@ static gboolean
 gsk_path_foreach_trampoline_add_curve (GskPathOperation        op,
                                        const graphene_point_t *pts,
                                        gsize                   n_pts,
+                                       float                   weight,
                                        gpointer                data)
 {
   GskPathForeachTrampoline *trampoline = data;
 
-  return trampoline->func (op, pts, n_pts, trampoline->user_data);
+  return trampoline->func (op, pts, n_pts, weight, trampoline->user_data);
 }
 
 static gboolean
 gsk_path_foreach_trampoline (GskPathOperation        op,
                              const graphene_point_t *pts,
                              gsize                   n_pts,
+                             float                   weight,
                              gpointer                data)
 {
   GskPathForeachTrampoline *trampoline = data;
@@ -698,14 +702,14 @@ gsk_path_foreach_trampoline (GskPathOperation        op,
     case GSK_PATH_MOVE:
     case GSK_PATH_CLOSE:
     case GSK_PATH_LINE:
-      return trampoline->func (op, pts, n_pts, trampoline->user_data);
+      return trampoline->func (op, pts, n_pts, weight, trampoline->user_data);
 
     case GSK_PATH_QUAD:
       {
         GskCurve curve;
 
         if (trampoline->flags & GSK_PATH_FOREACH_ALLOW_QUAD)
-          return trampoline->func (op, pts, n_pts, trampoline->user_data);
+          return trampoline->func (op, pts, n_pts, weight, trampoline->user_data);
         else if (trampoline->flags & GSK_PATH_FOREACH_ALLOW_CUBIC)
           {
             return trampoline->func (GSK_PATH_CUBIC,
@@ -718,6 +722,7 @@ gsk_path_foreach_trampoline (GskPathOperation        op,
                                        pts[2],
                                      },
                                      4,
+                                     weight,
                                      trampoline->user_data);
           }
 
@@ -733,10 +738,31 @@ gsk_path_foreach_trampoline (GskPathOperation        op,
         GskCurve curve;
 
         if (trampoline->flags & GSK_PATH_FOREACH_ALLOW_CUBIC)
-          return trampoline->func (op, pts, n_pts, trampoline->user_data);
+          return trampoline->func (op, pts, n_pts, weight, trampoline->user_data);
 
         gsk_curve_init (&curve, gsk_pathop_encode (GSK_PATH_CUBIC, pts));
-        if (trampoline->flags & GSK_PATH_FOREACH_ALLOW_QUAD)
+        if (trampoline->flags & (GSK_PATH_FOREACH_ALLOW_QUAD|GSK_PATH_FOREACH_ALLOW_CONIC))
+          return gsk_curve_decompose_curve (&curve,
+                                            trampoline->flags,
+                                            trampoline->tolerance,
+                                            gsk_path_foreach_trampoline_add_curve,
+                                            trampoline);
+
+        return gsk_curve_decompose (&curve,
+                                    trampoline->tolerance,
+                                    gsk_path_foreach_trampoline_add_line,
+                                    trampoline);
+      }
+
+    case GSK_PATH_CONIC:
+      {
+        GskCurve curve;
+
+        if (trampoline->flags & GSK_PATH_FOREACH_ALLOW_CONIC)
+          return trampoline->func (op, pts, n_pts, weight, trampoline->user_data);
+
+        gsk_curve_init (&curve, gsk_pathop_encode (GSK_PATH_CONIC, (graphene_point_t[4]) { pts[0], pts[1], { weight, 0.f }, pts[2] } ));
+        if (trampoline->flags & (GSK_PATH_FOREACH_ALLOW_QUAD|GSK_PATH_FOREACH_ALLOW_CUBIC))
           return gsk_curve_decompose_curve (&curve,
                                             trampoline->flags,
                                             trampoline->tolerance,
@@ -755,8 +781,9 @@ gsk_path_foreach_trampoline (GskPathOperation        op,
     }
 }
 
-#define ALLOW_ANY (GSK_PATH_FOREACH_ALLOW_QUAD| \
-                   GSK_PATH_FOREACH_ALLOW_CUBIC)
+#define ALLOW_ANY (GSK_PATH_FOREACH_ALLOW_QUAD  | \
+                   GSK_PATH_FOREACH_ALLOW_CUBIC | \
+                   GSK_PATH_FOREACH_ALLOW_CONIC)
 
 gboolean
 gsk_path_foreach_with_tolerance (GskPath             *self,
@@ -914,7 +941,7 @@ parse_command (const char **p,
   if (*cmd == 'X')
     allowed = "mM";
   else
-    allowed = "mMhHvVzZlLcCsStTqQoOaA";
+    allowed = "mMhHvVzZlLcCsStTqQaAoO";
 
   skip_whitespace (p);
   s = _strchr (allowed, **p);
@@ -930,12 +957,39 @@ parse_command (const char **p,
 static gboolean
 parse_string (const char **p,
               const char  *s)
-{
+{ 
   int len = strlen (s);
   if (strncmp (*p, s, len) != 0)
     return FALSE;
   (*p) += len;
   return TRUE;
+}
+
+#define NEAR(x, y) (fabs ((x) - (y)) < 0.001)
+
+static gboolean
+is_rect (double x0, double y0,
+         double x1, double y1,
+         double x2, double y2,
+         double x3, double y3)
+{
+  return NEAR (x0, x3) && NEAR (x1, x2) &&
+         NEAR (y0, y1) && NEAR (y2, y3) &&
+         x0 < x1 && y1 < y2;
+}
+
+static gboolean
+is_line (double x0, double y0,
+         double x1, double y1,
+         double x2, double y2,
+         double x3, double y3)
+{
+  if (NEAR (y0, y3))
+    return x0 <= x1 && x1 <= x2 && x2 <= x3 &&
+           NEAR (y0, y1) && NEAR (y0, y2) && NEAR (y0, y3);
+  else
+    return y0 <= y1 && y1 <= y2 && y2 <= y3 &&
+           NEAR (x0, x1) && NEAR (x0, x2) && NEAR (x0, x3);
 }
 
 static gboolean
@@ -948,7 +1002,6 @@ parse_rectangle (const char **p,
   const char *o = *p;
   double w2;
 
-  /* Check for M%g,%gh%gv%gh%gz without any intervening whitespace */
   if (parse_coordinate_pair (p, x, y) &&
       parse_string (p, "h") &&
       parse_coordinate (p, w) &&
@@ -957,7 +1010,7 @@ parse_rectangle (const char **p,
       parse_string (p, "h") &&
       parse_coordinate (p, &w2) &&
       parse_string (p, "z") &&
-      w2 == - *w)
+      w2 == -*w && *w >= 0 && *h >= 0)
     {
       skip_whitespace (p);
 
@@ -970,37 +1023,125 @@ parse_rectangle (const char **p,
 
 static gboolean
 parse_circle (const char **p,
-              double      *sx,
-              double      *sy,
+              double      *cx,
+              double      *cy,
               double      *r)
 {
   const char *o = *p;
-  double r1, r2, r3, mx, my, ex, ey;
+  double x0, y0, x1, y1, x2, y2, x3, y3;
+  double x4, y4, x5, y5, x6, y6, x7, y7;
+  double x8, y8, w0, w1, w2, w3;
+  double rr;
 
-  /* Check for M%g,%gA%g,%g,0,1,0,%g,%gA%g,%g,0,1,0,%g,%g
-   * without any intervening whitespace
-   */
-  if (parse_coordinate_pair (p, sx, sy) &&
-      parse_string (p, "A") &&
-      parse_coordinate_pair (p, r, &r1) &&
-      parse_string (p, "0 0 0") &&
-      parse_coordinate_pair (p, &mx, &my) &&
-      parse_string (p, "A") &&
-      parse_coordinate_pair (p, &r2, &r3) &&
-      parse_string (p, "0 0 0") &&
-      parse_coordinate_pair (p, &ex, &ey) &&
-      parse_string (p, "z") &&
-      *r == r1 && r1 == r2 && r2 == r3 &&
-      *sx == ex && *sy == ey)
+  if (parse_coordinate_pair (p, &x0, &y0) &&
+      parse_string (p, "o") &&
+      parse_coordinate_pair (p, &x1, &y1) &&
+      parse_coordinate_pair (p, &x2, &y2) &&
+      parse_nonnegative_number (p, &w0) &&
+      parse_string (p, "o") &&
+      parse_coordinate_pair (p, &x3, &y3) &&
+      parse_coordinate_pair (p, &x4, &y4) &&
+      parse_nonnegative_number (p, &w1) &&
+      parse_string (p, "o") &&
+      parse_coordinate_pair (p, &x5, &y5) &&
+      parse_coordinate_pair (p, &x6, &y6) &&
+      parse_nonnegative_number (p, &w2) &&
+      parse_string (p, "o") &&
+      parse_coordinate_pair (p, &x7, &y7) &&
+      parse_coordinate_pair (p, &x8, &y8) &&
+      parse_nonnegative_number (p, &w3) &&
+      parse_string (p, "z"))
     {
-      skip_whitespace (p);
+      rr = y1;
 
-      return TRUE;
+      if (x1 == 0   && y1 == rr  &&
+          x2 == -rr && y2 == rr  &&
+          x3 == -rr && y3 == 0   &&
+          x4 == -rr && y4 == -rr &&
+          x5 == 0   && y5 == -rr &&
+          x6 == rr  && y6 == -rr &&
+          x7 == rr  && y7 == 0   &&
+          x8 == rr  && y8 == rr &&
+          NEAR (w0, M_SQRT1_2) && NEAR (w1, M_SQRT1_2) &&
+          NEAR (w2, M_SQRT1_2) && NEAR (w3, M_SQRT1_2))
+        {
+          *cx = x0 - rr;
+          *cy = y0;
+          *r = rr;
+
+          skip_whitespace (p);
+
+          return TRUE;
+        }
     }
 
   *p = o;
   return FALSE;
 }
+
+static gboolean
+parse_rounded_rect (const char     **p,
+                    GskRoundedRect  *rr)
+{
+  const char *o = *p;
+  double x0, y0, x1, y1, x2, y2, x3, y3;
+  double x4, y4, x5, y5, x6, y6, x7, y7;
+  double x8, y8, x9, y9, x10, y10, x11, y11;
+  double x12, y12, w0, w1, w2, w3;
+
+  if (parse_coordinate_pair (p, &x0, &y0) &&
+      parse_string (p, "L") &&
+      parse_coordinate_pair (p, &x1, &y1) &&
+      parse_string (p, "O") &&
+      parse_coordinate_pair (p, &x2, &y2) &&
+      parse_coordinate_pair (p, &x3, &y3) &&
+      parse_nonnegative_number (p, &w0) &&
+      parse_string (p, "L") &&
+      parse_coordinate_pair (p, &x4, &y4) &&
+      parse_string (p, "O") &&
+      parse_coordinate_pair (p, &x5, &y5) &&
+      parse_coordinate_pair (p, &x6, &y6) &&
+      parse_nonnegative_number (p, &w1) &&
+      parse_string (p, "L") &&
+      parse_coordinate_pair (p, &x7, &y7) &&
+      parse_string (p, "O") &&
+      parse_coordinate_pair (p, &x8, &y8) &&
+      parse_coordinate_pair (p, &x9, &y9) &&
+      parse_nonnegative_number (p, &w2) &&
+      parse_string (p, "L") &&
+      parse_coordinate_pair (p, &x10, &y10) &&
+      parse_string (p, "O") &&
+      parse_coordinate_pair (p, &x11, &y11) &&
+      parse_coordinate_pair (p, &x12, &y12) &&
+      parse_nonnegative_number (p, &w3) &&
+      parse_string (p, "Z"))
+    {
+      if (NEAR (x0, x12) && NEAR (y0, y12) &&
+          is_rect (x11, y11, x2, y2, x5, y5, x8, y8) &&
+          is_line (x11, y11, x0, y0, x1, y1, x2, y2) &&
+          is_line (x2, y2, x3, y3, x4, y4, x5, y5) &&
+          is_line (x8, y8, x7, y7, x6, y6, x5, y5) &&
+          is_line (x11, y11, x10, y10, x9, y9, x8, y8) &&
+          NEAR (w0, M_SQRT1_2) && NEAR (w1, M_SQRT1_2) &&
+          NEAR (w2, M_SQRT1_2) && NEAR (w3, M_SQRT1_2))
+        {
+          rr->bounds = GRAPHENE_RECT_INIT (x11, y11, x5 - x11, y5 - y11);
+          rr->corner[GSK_CORNER_TOP_LEFT] = GRAPHENE_SIZE_INIT (x12 - x11, y10 - y11);
+          rr->corner[GSK_CORNER_TOP_RIGHT] = GRAPHENE_SIZE_INIT (x2 - x1, y3 - y2);
+          rr->corner[GSK_CORNER_BOTTOM_RIGHT] = GRAPHENE_SIZE_INIT (x5 - x6, y5 - y4);
+          rr->corner[GSK_CORNER_BOTTOM_LEFT] = GRAPHENE_SIZE_INIT (x7 - x8, y8 - y7);
+
+          skip_whitespace (p);
+
+          return TRUE;
+        }
+    }
+
+  *p = o;
+  return FALSE;
+}
+
+#undef NEAR
 
 /**
  * gsk_path_parse:
@@ -1009,7 +1150,7 @@ parse_circle (const char **p,
  * This is a convenience function that constructs a `GskPath`
  * from a serialized form.
  *
- * The string is expected to be in
+ * The string is expected to be in (a superset of)
  * [SVG path syntax](https://www.w3.org/TR/SVG11/paths.html#PathData),
  * as e.g. produced by [method@Gsk.Path.to_string].
  *
@@ -1025,12 +1166,14 @@ parse_circle (const char **p,
  * - `T x2 y2` Add a quadratic Bézier, using the reflection of the previous segments' control point as control point
  * - `S x2 y2 x3 y3` Add a cubic Bézier, using the reflection of the previous segments' second control point as first control point
  * - `A rx ry r l s x y` Add an elliptical arc from the current point to `(x, y)` with radii rx and ry. See the SVG documentation for how the other parameters influence the arc.
+ * - `O x1 y1 x2 y2 w` Add a rational quadratic Bézier from the current point to `(x2, y2)` with control point `(x1, y1)` and weight `w`.
  *
  * All the commands have lowercase variants that interpret coordinates
  * relative to the current point.
  *
- * Returns: (nullable): a new `GskPath`, or `NULL`
- *   if @string could not be parsed
+ * The `O` command is an extension that is not supported in SVG.
+ *
+ * Returns: (nullable): a new `GskPath`, or `NULL` if @string could not be parsed
  *
  * Since: 4.14
  */
@@ -1085,7 +1228,9 @@ gsk_path_parse (const char *string)
         case 'm':
           {
             double x1, y1, w, h, r;
+            GskRoundedRect rr;
 
+            /* Look for special contours */
             if (parse_rectangle (&p, &x1, &y1, &w, &h))
               {
                 gsk_path_builder_add_rect (builder, &GRAPHENE_RECT_INIT (x1, y1, w, h));
@@ -1094,19 +1239,35 @@ gsk_path_parse (const char *string)
                     path_x = x1;
                     path_y = y1;
                   }
+
                 x = x1;
                 y = y1;
               }
             else if (parse_circle (&p, &x1, &y1, &r))
               {
-                gsk_path_builder_add_circle (builder, &GRAPHENE_POINT_INIT (x1 - r, y1), r);
+                gsk_path_builder_add_circle (builder, &GRAPHENE_POINT_INIT (x1, y1), r);
+
                 if (_strchr ("zZX", prev_cmd))
                   {
-                    path_x = x1;
+                    path_x = x1 + r;
                     path_y = y1;
                   }
-                x = x1;
+
+                x = x1 + r;
                 y = y1;
+              }
+            else if (parse_rounded_rect (&p, &rr))
+              {
+                gsk_path_builder_add_rounded_rect (builder, &rr);
+
+                if (_strchr ("zZX", prev_cmd))
+                  {
+                    path_x = rr.bounds.origin.x + rr.corner[GSK_CORNER_TOP_LEFT].width;
+                    path_y = rr.bounds.origin.y;
+                  }
+
+                x = rr.bounds.origin.x + rr.corner[GSK_CORNER_TOP_LEFT].width;
+                y = rr.bounds.origin.y;
               }
             else if (parse_coordinate_pair (&p, &x1, &y1))
               {
@@ -1115,6 +1276,7 @@ gsk_path_parse (const char *string)
                     x1 += x;
                     y1 += y;
                   }
+
                 if (repeat)
                   gsk_path_builder_line_to (builder, x1, y1);
                 else
@@ -1126,6 +1288,7 @@ gsk_path_parse (const char *string)
                         path_y = y1;
                       }
                   }
+
                 x = x1;
                 y = y1;
               }
@@ -1348,6 +1511,37 @@ gsk_path_parse (const char *string)
                 gsk_path_builder_quad_to (builder, x1, y1, x2, y2);
                 prev_x1 = x1;
                 prev_y1 = y1;
+                x = x2;
+                y = y2;
+              }
+            else
+              goto error;
+          }
+          break;
+
+        case 'O':
+        case 'o':
+          {
+            double x1, y1, x2, y2, weight;
+
+            if (parse_coordinate_pair (&p, &x1, &y1) &&
+                parse_coordinate_pair (&p, &x2, &y2) &&
+                parse_nonnegative_number (&p, &weight))
+              {
+                if (cmd == 'o')
+                  {
+                    x1 += x;
+                    y1 += y;
+                    x2 += x;
+                    y2 += y;
+                  }
+                if (_strchr ("zZ", prev_cmd))
+                  { 
+                    gsk_path_builder_move_to (builder, x, y);
+                    path_x = x;
+                    path_y = y;
+                  }
+                gsk_path_builder_conic_to (builder, x1, y1, x2, y2, weight);
                 x = x2;
                 y = y2;
               }

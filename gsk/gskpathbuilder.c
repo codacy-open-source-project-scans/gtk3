@@ -24,8 +24,8 @@
 #include "gskpathbuilder.h"
 
 #include "gskpathprivate.h"
+#include "gskpathpointprivate.h"
 #include "gskcontourprivate.h"
-#include "gsksplineprivate.h"
 
 /**
  * GskPathBuilder:
@@ -65,7 +65,7 @@
  * [method@Gsk.PathBuilder.close] to close the path by connecting it
  * back with a line to the starting point.
  *
- * This is similar for how paths are drawn in Cairo.
+ * This is similar to how paths are drawn in Cairo.
  *
  * Since: 4.14
  */
@@ -241,7 +241,7 @@ gsk_path_builder_unref (GskPathBuilder *self)
  * @self: a `GskPathBuilder`
  *
  * Creates a new `GskPath` from the current state of the
- * given builder, and frees the @builder instance.
+ * given builder, and unrefs the @builder instance.
  *
  * Returns: (transfer full): the newly created `GskPath`
  *   with all the contours added to the builder
@@ -311,12 +311,14 @@ gsk_path_builder_add_contour (GskPathBuilder *self,
  * gsk_path_builder_get_current_point:
  * @self: a `GskPathBuilder`
  *
- * Gets the current point. The current point is used for relative
- * drawing commands and updated after every operation.
+ * Gets the current point.
  *
- * When the builder is created, the default current point is set to (0, 0).
- * Note that this is different from cairo, which starts out without
- * a current point.
+ * The current point is used for relative drawing commands and
+ * updated after every operation.
+ *
+ * When the builder is created, the default current point is set
+ * to `0, 0`. Note that this is different from cairo, which starts
+ * out without a current point.
  *
  * Returns: (transfer none): The current point
  *
@@ -444,9 +446,6 @@ gsk_path_builder_add_cairo_path (GskPathBuilder     *self,
  *
  * The path is going around the rectangle in clockwise direction.
  *
- * If the width or height of the rectangle is negative, the start
- * point will be on the right or bottom, respectively.
- *
  * If the the width or height are 0, the path will be a closed
  * horizontal or vertical line. If both are 0, it'll be a closed dot.
  *
@@ -456,20 +455,13 @@ void
 gsk_path_builder_add_rect (GskPathBuilder        *self,
                            const graphene_rect_t *rect)
 {
-  graphene_point_t current;
+  graphene_rect_t r;
 
   g_return_if_fail (self != NULL);
+  g_return_if_fail (rect != NULL);
 
-  current = self->current_point;
-
-  gsk_path_builder_move_to (self, rect->origin.x, rect->origin.y);
-
-  gsk_path_builder_rel_line_to (self, rect->size.width, 0);
-  gsk_path_builder_rel_line_to (self, 0, rect->size.height);
-  gsk_path_builder_rel_line_to (self, - rect->size.width, 0);
-
-  gsk_path_builder_close (self);
-  self->current_point = current;
+  graphene_rect_normalize_r (rect, &r);
+  gsk_path_builder_add_contour (self, gsk_rect_contour_new (&r));
 }
 
 /**
@@ -487,77 +479,10 @@ void
 gsk_path_builder_add_rounded_rect (GskPathBuilder       *self,
                                    const GskRoundedRect *rect)
 {
-  graphene_point_t current;
-
   g_return_if_fail (self != NULL);
   g_return_if_fail (rect != NULL);
 
-  current = self->current_point;
-
-  gsk_path_builder_move_to (self,
-                            rect->bounds.origin.x + rect->corner[GSK_CORNER_TOP_LEFT].width,
-                            rect->bounds.origin.y);
-  /* top */
-  gsk_path_builder_line_to (self,
-                            rect->bounds.origin.x + rect->bounds.size.width - rect->corner[GSK_CORNER_TOP_RIGHT].width,
-                            rect->bounds.origin.y);
-  /* topright corner */
-  gsk_path_builder_svg_arc_to (self,
-                               rect->corner[GSK_CORNER_TOP_RIGHT].width,
-                               rect->corner[GSK_CORNER_TOP_RIGHT].height,
-                               0, FALSE, TRUE,
-                               rect->bounds.origin.x + rect->bounds.size.width,
-                               rect->bounds.origin.y + rect->corner[GSK_CORNER_TOP_RIGHT].height);
-  /* right */
-  gsk_path_builder_line_to (self,
-                            rect->bounds.origin.x + rect->bounds.size.width,
-                            rect->bounds.origin.y + rect->bounds.size.height - rect->corner[GSK_CORNER_BOTTOM_RIGHT].height);
-  /* bottomright corner */
-  gsk_path_builder_svg_arc_to (self,
-                               rect->corner[GSK_CORNER_BOTTOM_RIGHT].width,
-                               rect->corner[GSK_CORNER_BOTTOM_RIGHT].height,
-                               0, FALSE, TRUE,
-                               rect->bounds.origin.x + rect->bounds.size.width - rect->corner[GSK_CORNER_BOTTOM_RIGHT].width,
-                               rect->bounds.origin.y + rect->bounds.size.height);
-  /* bottom */
-  gsk_path_builder_line_to (self,
-                            rect->bounds.origin.x + rect->corner[GSK_CORNER_BOTTOM_LEFT].width,
-                            rect->bounds.origin.y + rect->bounds.size.height);
-  /* bottomleft corner */
-  gsk_path_builder_svg_arc_to (self,
-                               rect->corner[GSK_CORNER_BOTTOM_LEFT].width,
-                               rect->corner[GSK_CORNER_BOTTOM_LEFT].height,
-                               0, FALSE, TRUE,
-                               rect->bounds.origin.x,
-                               rect->bounds.origin.y + rect->bounds.size.height - rect->corner[GSK_CORNER_BOTTOM_LEFT].height);
-  /* left */
-  gsk_path_builder_line_to (self,
-                            rect->bounds.origin.x,
-                            rect->bounds.origin.y + rect->corner[GSK_CORNER_TOP_LEFT].height);
-  /* topleft corner */
-  gsk_path_builder_svg_arc_to (self,
-                               rect->corner[GSK_CORNER_TOP_LEFT].width,
-                               rect->corner[GSK_CORNER_TOP_LEFT].height,
-                               0, FALSE, TRUE,
-                               rect->bounds.origin.x + rect->corner[GSK_CORNER_TOP_LEFT].width,
-                               rect->bounds.origin.y);
-  /* done */
-  gsk_path_builder_close (self);
-  self->current_point = current;
-}
-
-static gboolean
-circle_contour_curve (const graphene_point_t pts[4],
-                      gpointer                data)
-{
-  GskPathBuilder *self = data;
-
-  gsk_path_builder_cubic_to (self,
-                             pts[1].x, pts[1].y,
-                             pts[2].x, pts[2].y,
-                             pts[3].x, pts[3].y);
-
-  return TRUE;
+  gsk_path_builder_add_contour (self, gsk_rounded_rect_contour_new (rect));
 }
 
 /**
@@ -570,6 +495,8 @@ circle_contour_curve (const graphene_point_t pts[4],
  *
  * The path is going around the circle in clockwise direction.
  *
+ * If @radius is zero, the contour will be a closed point.
+ *
  * Since: 4.14
  */
 void
@@ -577,22 +504,11 @@ gsk_path_builder_add_circle (GskPathBuilder         *self,
                              const graphene_point_t *center,
                              float                   radius)
 {
-  graphene_point_t current;
-
   g_return_if_fail (self != NULL);
   g_return_if_fail (center != NULL);
-  g_return_if_fail (radius > 0);
+  g_return_if_fail (radius >= 0);
 
-  current = self->current_point;
-
-  gsk_path_builder_move_to (self, center->x + radius, center->y);
-  gsk_spline_decompose_arc (center, radius,
-                            GSK_PATH_TOLERANCE_DEFAULT,
-                            0, 2 * M_PI,
-                            circle_contour_curve, self);
-
-  gsk_path_builder_close (self);
-  self->current_point = current;
+  gsk_path_builder_add_contour (self, gsk_circle_contour_new (center, radius));
 }
 
 /**
@@ -629,8 +545,8 @@ gsk_path_builder_move_to (GskPathBuilder *self,
  * @x: x offset
  * @y: y offset
  *
- * Starts a new contour by placing the pen at @x, @y relative to the current
- * point.
+ * Starts a new contour by placing the pen at @x, @y
+ * relative to the current point.
  *
  * This is the relative version of [method@Gsk.PathBuilder.move_to].
  *
@@ -656,6 +572,11 @@ gsk_path_builder_rel_move_to (GskPathBuilder *self,
  *
  * Draws a line from the current point to @x, @y and makes it
  * the new current point.
+ *
+ * <picture>
+ *   <source srcset="line-dark.png" media="(prefers-color-scheme: dark)">
+ *   <img alt="Line To" src="line-light.png">
+ * </picture>
  *
  * Since: 4.14
  */
@@ -684,8 +605,8 @@ gsk_path_builder_line_to (GskPathBuilder *self,
  * @x: x offset
  * @y: y offset
  *
- * Draws a line from the current point to a point offset to it by @x, @y
- * and makes it the new current point.
+ * Draws a line from the current point to a point offset from it
+ * by @x, @y and makes it the new current point.
  *
  * This is the relative version of [method@Gsk.PathBuilder.line_to].
  *
@@ -715,6 +636,11 @@ gsk_path_builder_rel_line_to (GskPathBuilder *self,
  * from the current point to @x2, @y2 with @x1, @y1 as the control point.
  *
  * After this, @x2, @y2 will be the new current point.
+ *
+ * <picture>
+ *   <source srcset="quad-dark.png" media="(prefers-color-scheme: dark)">
+ *   <img alt="Quad To" src="quad-light.png">
+ * </picture>
  *
  * Since: 4.14
  */
@@ -785,6 +711,11 @@ gsk_path_builder_rel_quad_to (GskPathBuilder *self,
  *
  * After this, @x3, @y3 will be the new current point.
  *
+ * <picture>
+ *   <source srcset="cubic-dark.png" media="(prefers-color-scheme: dark)">
+ *   <img alt="Cubic To" src="cubic-light.png">
+ * </picture>
+ *
  * Since: 4.14
  */
 void
@@ -820,7 +751,9 @@ gsk_path_builder_cubic_to (GskPathBuilder *self,
  *
  * Adds a [cubic Bézier curve](https://en.wikipedia.org/wiki/B%C3%A9zier_curve)
  * from the current point to @x3, @y3 with @x1, @y1 and @x2, @y2 as the control
- * points. All coordinates are given relative to the current point.
+ * points.
+ *
+ * All coordinates are given relative to the current point.
  *
  * This is the relative version of [method@Gsk.PathBuilder.cubic_to].
  *
@@ -847,6 +780,163 @@ gsk_path_builder_rel_cubic_to (GskPathBuilder *self,
 }
 
 /**
+ * gsk_path_builder_conic_to:
+ * @self: a `GskPathBuilder`
+ * @x1: x coordinate of control point
+ * @y1: y coordinate of control point
+ * @x2: x coordinate of the end of the curve
+ * @y2: y coordinate of the end of the curve
+ * @weight: weight of the control point, must be greater than zero
+ *
+ * Adds a [conic curve](https://en.wikipedia.org/wiki/Non-uniform_rational_B-spline)
+ * from the current point to @x2, @y2 with the given @weight and @x1, @y1 as the
+ * control point.
+ *
+ * The weight determines how strongly the curve is pulled towards the control point.
+ * A conic with weight 1 is identical to a quadratic Bézier curve with the same points.
+ *
+ * Conic curves can be used to draw ellipses and circles. They are also known as
+ * rational quadratic Bézier curves.
+ *
+ * After this, @x2, @y2 will be the new current point.
+ *
+ * <picture>
+ *   <source srcset="conic-dark.png" media="(prefers-color-scheme: dark)">
+ *   <img alt="Conic To" src="conic-light.png">
+ * </picture>
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_conic_to (GskPathBuilder *self,
+                           float           x1,
+                           float           y1,
+                           float           x2,
+                           float           y2,
+                           float           weight)
+{
+  g_return_if_fail (self != NULL);
+  g_return_if_fail (weight > 0);
+
+  self->flags &= ~GSK_PATH_FLAT;
+  gsk_path_builder_append_current (self,
+                                   GSK_PATH_CONIC,
+                                   3, (graphene_point_t[3]) {
+                                     GRAPHENE_POINT_INIT (x1, y1),
+                                     GRAPHENE_POINT_INIT (weight, 0),
+                                     GRAPHENE_POINT_INIT (x2, y2)
+                                   });
+}
+
+/**
+ * gsk_path_builder_rel_conic_to:
+ * @self: a `GskPathBuilder`
+ * @x1: x offset of control point
+ * @y1: y offset of control point
+ * @x2: x offset of the end of the curve
+ * @y2: y offset of the end of the curve
+ * @weight: weight of the curve, must be greater than zero
+ *
+ * Adds a [conic curve](https://en.wikipedia.org/wiki/Non-uniform_rational_B-spline)
+ * from the current point to @x2, @y2 with the given @weight and @x1, @y1 as the
+ * control point.
+ *
+ * All coordinates are given relative to the current point.
+ *
+ * This is the relative version of [method@Gsk.PathBuilder.conic_to].
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_rel_conic_to (GskPathBuilder *self,
+                               float           x1,
+                               float           y1,
+                               float           x2,
+                               float           y2,
+                               float           weight)
+{
+  g_return_if_fail (self != NULL);
+  g_return_if_fail (weight > 0);
+
+  gsk_path_builder_conic_to (self,
+                             self->current_point.x + x1,
+                             self->current_point.y + y1,
+                             self->current_point.x + x2,
+                             self->current_point.y + y2,
+                             weight);
+}
+
+/**
+ * gsk_path_builder_arc_to:
+ * @self: a `GskPathBuilder`
+ * @x1: x coordinate of first control point
+ * @y1: y coordinate of first control point
+ * @x2: x coordinate of second control point
+ * @y2: y coordinate of second control point
+ *
+ * Adds an elliptical arc from the current point to @x3, @y3
+ * with @x1, @y1 determining the tangent directions.
+ *
+ * After this, @x3, @y3 will be the new current point.
+ *
+ * Note: Two points and their tangents do not determine
+ * a unique ellipse, so GSK just picks one. If you need more
+ * precise control, use [method@Gsk.PathBuilder.conic_to]
+ * or [method@Gsk.PathBuilder.svg_arc_to].
+ *
+ * <picture>
+ *   <source srcset="arc-dark.png" media="(prefers-color-scheme: dark)">
+ *   <img alt="Arc To" src="arc-light.png">
+ * </picture>
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_arc_to (GskPathBuilder *self,
+                         float           x1,
+                         float           y1,
+                         float           x2,
+                         float           y2)
+{
+  g_return_if_fail (self != NULL);
+
+  gsk_path_builder_conic_to (self, x1, y1, x2, y2, M_SQRT1_2);
+}
+
+/**
+ * gsk_path_builder_rel_arc_to:
+ * @self: a `GskPathBuilder`
+ * @x1: x coordinate of first control point
+ * @y1: y coordinate of first control point
+ * @x2: x coordinate of second control point
+ * @y2: y coordinate of second control point
+ *
+ * Adds an elliptical arc from the current point to @x3, @y3
+ * with @x1, @y1 determining the tangent directions.
+ *
+ * All coordinates are given relative to the current point.
+ *
+ * This is the relative version of [method@Gsk.PathBuilder.arc_to].
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_rel_arc_to (GskPathBuilder *self,
+                             float           x1,
+                             float           y1,
+                             float           x2,
+                             float           y2)
+{
+  g_return_if_fail (self != NULL);
+
+  gsk_path_builder_arc_to (self,
+                           self->current_point.x + x1,
+                           self->current_point.y + y1,
+                           self->current_point.x + x2,
+                           self->current_point.y + y2);
+}
+
+/**
  * gsk_path_builder_close:
  * @self: a `GskPathBuilder`
  *
@@ -854,9 +944,9 @@ gsk_path_builder_rel_cubic_to (GskPathBuilder *self,
  *
  * Note that this is different from calling [method@Gsk.PathBuilder.line_to]
  * with the start point in that the contour will be closed. A closed
- * contour behaves different from an open one when stroking its start
- * and end point are considered connected, so they will be joined
- * via the line join, and not ended with line caps.
+ * contour behaves differently from an open one. When stroking, its
+ * start and end point are considered connected, so they will be
+ * joined via the line join, and not ended with line caps.
  *
  * Since: 4.14
  */
@@ -923,6 +1013,27 @@ _sincos (double angle,
 #endif
 }
 
+/**
+ * gsk_path_builder_svg_arc_to:
+ * @self: a `GskPathBuilder`
+ * @rx: X radius
+ * @ry: Y radius
+ * @x_axis_rotation: the rotation of the ellipsis
+ * @large_arc: whether to add the large arc
+ * @positive_sweep: whether to sweep in the positive direction
+ * @x: the X coordinate of the endpoint
+ * @y: the Y coordinate of the endpoint
+ *
+ * Implements arc-to according to the SVG spec.
+ *
+ * A convenience function that implements the
+ * [SVG arc_to](https://www.w3.org/TR/SVG11/paths.html#PathDataEllipticalArcCommands)
+ * functionality.
+ *
+ * After this, @x, @y will be the new current point.
+ *
+ * Since: 4.14
+ */
 void
 gsk_path_builder_svg_arc_to (GskPathBuilder *self,
                              float           rx,
@@ -954,6 +1065,8 @@ gsk_path_builder_svg_arc_to (GskPathBuilder *self,
   double sin_th1, cos_th1;
   double th_half;
   double t;
+
+  g_return_if_fail (self != NULL);
 
   if (self->points->len > 0)
     {
@@ -1055,12 +1168,183 @@ gsk_path_builder_svg_arc_to (GskPathBuilder *self,
 }
 
 /**
+ * gsk_path_builder_rel_svg_arc_to:
+ * @self: a `GskPathBuilder`
+ * @rx: X radius
+ * @ry: Y radius
+ * @x_axis_rotation: the rotation of the ellipsis
+ * @large_arc: whether to add the large arc
+ * @positive_sweep: whether to sweep in the positive direction
+ * @x: the X coordinate of the endpoint
+ * @y: the Y coordinate of the endpoint
+ *
+ * Implements arc-to according to the SVG spec.
+ *
+ * All coordinates are given relative to the current point.
+ *
+ * This is the relative version of [method@Gsk.PathBuilder.svg_arc_to].
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_rel_svg_arc_to (GskPathBuilder *self,
+                                 float           rx,
+                                 float           ry,
+                                 float           x_axis_rotation,
+                                 gboolean        large_arc,
+                                 gboolean        positive_sweep,
+                                 float           x,
+                                 float           y)
+{
+  gsk_path_builder_svg_arc_to (self,
+                               rx, ry,
+                               x_axis_rotation,
+                               large_arc,
+                               positive_sweep,
+                               self->current_point.x + x,
+                               self->current_point.y + y);
+}
+
+/* Return the angle between t1 and t2 in radians, such that
+ * 0 means straight continuation
+ * < 0 means right turn
+ * > 0 means left turn
+ */
+static float
+angle_between (const graphene_vec2_t *t1,
+               const graphene_vec2_t *t2)
+{
+  float angle = atan2 (graphene_vec2_get_y (t2), graphene_vec2_get_x (t2))
+                - atan2 (graphene_vec2_get_y (t1), graphene_vec2_get_x (t1));
+
+  if (angle > M_PI)
+    angle -= 2 * M_PI;
+  if (angle < - M_PI)
+    angle += 2 * M_PI;
+
+  return angle;
+}
+
+#define RAD_TO_DEG(r) ((r)*180.f/M_PI)
+#define DEG_TO_RAD(d) ((d)*M_PI/180.f)
+
+static float
+angle_between_points (const graphene_point_t *c,
+                      const graphene_point_t *a,
+                      const graphene_point_t *b)
+{
+  graphene_vec2_t t1, t2;
+
+  graphene_vec2_init (&t1, a->x - c->x, a->y - c->y);
+  graphene_vec2_init (&t2, b->x - c->x, b->y - c->y);
+
+  return (float) RAD_TO_DEG (angle_between (&t1, &t2));
+}
+
+/**
+ * gsk_path_builder_html_arc_to:
+ * @self: a `GskPathBuilder`
+ * @x1: X coordinate of first control point
+ * @y1: Y coordinate of first control point
+ * @x2: X coordinate of second control point
+ * @y2: Y coordinate of second control point
+ * @radius: Radius of the circle
+ *
+ * Implements arc-to according to the HTML Canvas spec.
+ *
+ * A convenience function that implements the
+ * [HTML arc_to](https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-arcto-dev)
+ * functionality.
+ *
+ * After this, the current point will be the point where
+ * the circle with the given radius touches the line from
+ * @x1, @y1 to @x2, @y2.
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_html_arc_to (GskPathBuilder *self,
+                              float           x1,
+                              float           y1,
+                              float           x2,
+                              float           y2,
+                              float           radius)
+{
+  float angle, b;
+  graphene_vec2_t t;
+  graphene_point_t p, q;
+
+  g_return_if_fail (self != NULL);
+  g_return_if_fail (radius > 0);
+
+  angle = angle_between_points (&GRAPHENE_POINT_INIT (x1, y1),
+                                &self->current_point,
+                                &GRAPHENE_POINT_INIT (x2, y2));
+
+  if (fabsf (angle) < 3)
+    {
+      gsk_path_builder_line_to (self, x2, y2);
+      return;
+    }
+
+  b = radius / tanf (fabsf ((float) DEG_TO_RAD (angle / 2)));
+
+  graphene_vec2_init (&t, self->current_point.x - x1, self->current_point.y - y1);
+  graphene_vec2_normalize (&t, &t);
+
+  p.x = x1 + b * graphene_vec2_get_x (&t);
+  p.y = y1 + b * graphene_vec2_get_y (&t);
+
+  graphene_vec2_init (&t, x2 - x1, y2 - y1);
+  graphene_vec2_normalize (&t, &t);
+
+  q.x = x1 + b * graphene_vec2_get_x (&t);
+  q.y = y1 + b * graphene_vec2_get_y (&t);
+
+  gsk_path_builder_line_to (self, p.x, p.y);
+
+  gsk_path_builder_svg_arc_to (self, radius, radius, 0, FALSE, angle < 0, q.x, q.y);
+}
+
+/**
+ * gsk_path_builder_rel_html_arc_to:
+ * @self: a `GskPathBuilder`
+ * @x1: X coordinate of first control point
+ * @y1: Y coordinate of first control point
+ * @x2: X coordinate of second control point
+ * @y2: Y coordinate of second control point
+ * @radius: Radius of the circle
+ *
+ * Implements arc-to according to the HTML Canvas spec.
+ *
+ * All coordinates are given relative to the current point.
+ *
+ * This is the relative version of [method@Gsk.PathBuilder.html_arc_to].
+ *
+ * Since: 4.14
+ */
+void
+gsk_path_builder_rel_html_arc_to (GskPathBuilder *self,
+                                  float           x1,
+                                  float           y1,
+                                  float           x2,
+                                  float           y2,
+                                  float           radius)
+{
+  gsk_path_builder_html_arc_to (self,
+                                self->current_point.x + x1,
+                                self->current_point.y + y1,
+                                self->current_point.x + x2,
+                                self->current_point.y + y2,
+                                radius);
+}
+
+/**
  * gsk_path_builder_add_layout:
  * @self: a #GskPathBuilder
  * @layout: the pango layout to add
  *
- * Adds the outlines for the glyphs in @layout to
- * the builder.
+ * Adds the outlines for the glyphs in @layout to the builder.
  *
  * Since: 4.14
  */
@@ -1110,53 +1394,56 @@ gsk_path_builder_add_segment (GskPathBuilder     *self,
                               const GskPathPoint *start,
                               const GskPathPoint *end)
 {
-  GskRealPathPoint *s = (GskRealPathPoint *) start;
-  GskRealPathPoint *e = (GskRealPathPoint *) end;
   const GskContour *contour;
   gsize n_contours = gsk_path_get_n_contours (path);
   graphene_point_t current;
+  gsize n_ops;
 
   g_return_if_fail (self != NULL);
   g_return_if_fail (path != NULL);
-  g_return_if_fail (start != NULL);
-  g_return_if_fail (end != NULL);
-  g_return_if_fail (s->contour < n_contours);
-  g_return_if_fail (e->contour < n_contours);
+  g_return_if_fail (gsk_path_point_valid (start, path));
+  g_return_if_fail (gsk_path_point_valid (end, path));
 
   current = self->current_point;
 
-  contour = gsk_path_get_contour (path, s->contour);
+  contour = gsk_path_get_contour (path, start->contour);
+  n_ops = gsk_contour_get_n_ops (contour);
 
-  if (s->contour == e->contour)
+  if (start->contour == end->contour)
     {
       if (gsk_path_point_compare (start, end) < 0)
         {
-          gsk_contour_add_segment (contour, self, TRUE, s, e);
+          gsk_contour_add_segment (contour, self, TRUE, start, end);
           goto out;
         }
       else if (n_contours == 1)
         {
-          gsk_contour_add_segment (contour, self, TRUE,
-                                   s,
-                                   &(GskRealPathPoint) { s->contour, gsk_contour_get_n_points (contour) - 1, 1 });
-          gsk_contour_add_segment (contour, self, FALSE,
-                                   &(GskRealPathPoint) { s->contour, 1, 0 },
-                                   e);
+          if (n_ops > 1)
+            gsk_contour_add_segment (contour, self, TRUE,
+                                     start,
+                                     &GSK_PATH_POINT_INIT (start->contour, n_ops - 1, 1.f));
+          gsk_contour_add_segment (contour, self, n_ops <= 1,
+                                   &GSK_PATH_POINT_INIT (start->contour, 1, 0.f),
+                                   end);
           goto out;
         }
     }
 
-  gsk_contour_add_segment (contour, self, TRUE,
-                           s,
-                           &(GskRealPathPoint) { s->contour, gsk_contour_get_n_points (contour) - 1, 1 });
+  if (n_ops > 1)
+    gsk_contour_add_segment (contour, self, TRUE,
+                             start,
+                             &GSK_PATH_POINT_INIT (start->contour, n_ops - 1, 1.f));
 
-  for (gsize i = (s->contour + 1) % n_contours; i != e->contour; i = (i + 1) % n_contours)
+  for (gsize i = (start->contour + 1) % n_contours; i != end->contour; i = (i + 1) % n_contours)
     gsk_path_builder_add_contour (self, gsk_contour_dup (gsk_path_get_contour (path, i)));
 
-  contour = gsk_path_get_contour (path, e->contour);
-  gsk_contour_add_segment (contour, self, FALSE,
-                           &(GskRealPathPoint) { e->contour, 1, 0 },
-                           e);
+  contour = gsk_path_get_contour (path, end->contour);
+  n_ops = gsk_contour_get_n_ops (contour);
+
+  if (n_ops > 1)
+    gsk_contour_add_segment (contour, self, TRUE,
+                             &GSK_PATH_POINT_INIT (end->contour, 1, 0.f),
+                             end);
 
 out:
   gsk_path_builder_end_current (self);

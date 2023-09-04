@@ -66,6 +66,8 @@ struct _GskPath
 
 G_DEFINE_BOXED_TYPE (GskPath, gsk_path, gsk_path_ref, gsk_path_unref)
 
+/* {{{ Private API */
+
 GskPath *
 gsk_path_new_from_contours (const GSList *contours)
 {
@@ -110,6 +112,31 @@ gsk_path_new_from_contours (const GSList *contours)
   return path;
 }
 
+const GskContour *
+gsk_path_get_contour (const GskPath *self,
+                      gsize          i)
+{
+  if (i < self->n_contours)
+    return self->contours[i];
+  else
+    return NULL;
+}
+
+GskPathFlags
+gsk_path_get_flags (const GskPath *self)
+{
+  return self->flags;
+}
+
+gsize
+gsk_path_get_n_contours (const GskPath *self)
+{
+  return self->n_contours;
+}
+
+/* }}} */
+/* {{{ Public API */
+
 /**
  * gsk_path_ref:
  * @self: a `GskPath`
@@ -151,22 +178,6 @@ gsk_path_unref (GskPath *self)
     return;
 
   g_free (self);
-}
-
-const GskContour *
-gsk_path_get_contour (const GskPath *self,
-                      gsize          i)
-{
-  if (i < self->n_contours)
-    return self->contours[i];
-  else
-    return NULL;
-}
-
-GskPathFlags
-gsk_path_get_flags (const GskPath *self)
-{
-  return self->flags;
 }
 
 /**
@@ -293,20 +304,6 @@ gsk_path_to_cairo (GskPath *self,
                                    cairo_get_tolerance (cr),
                                    gsk_path_to_cairo_add_op,
                                    cr);
-}
-
-/*< private >
- * gsk_path_get_n_contours:
- * @path: a `GskPath`
- *
- * Gets the number of contours @path is composed out of.
- *
- * Returns: the number of contours in @path
- */
-gsize
-gsk_path_get_n_contours (const GskPath *self)
-{
-  return self->n_contours;
 }
 
 /**
@@ -565,6 +562,7 @@ gsk_path_get_end_point (GskPath      *self,
  * @point: the point
  * @threshold: maximum allowed distance
  * @result: (out caller-allocates): return location for the closest point
+ * @distance: (out) (optional): return location for the distance
  *
  * Computes the closest point on the path to the given point
  * and sets the @result to it.
@@ -581,7 +579,8 @@ gboolean
 gsk_path_get_closest_point (GskPath                *self,
                             const graphene_point_t *point,
                             float                   threshold,
-                            GskPathPoint           *result)
+                            GskPathPoint           *result,
+                            float                  *distance)
 {
   gboolean found;
 
@@ -594,19 +593,25 @@ gsk_path_get_closest_point (GskPath                *self,
 
   for (int i = 0; i < self->n_contours; i++)
     {
-      float distance;
+      float dist;
 
-      if (gsk_contour_get_closest_point (self->contours[i], point, threshold, result, &distance))
+      if (gsk_contour_get_closest_point (self->contours[i], point, threshold, result, &dist))
         {
           found = TRUE;
           g_assert (0 <= result->t && result->t <= 1);
           result->contour = i;
-          threshold = distance;
+          threshold = dist;
+
+          if (distance)
+            *distance = dist;
         }
     }
 
   return found;
 }
+
+/* }}} */
+/* {{{ Foreach and decomposition */
 
 /**
  * gsk_path_foreach:
@@ -805,14 +810,15 @@ gsk_path_foreach_with_tolerance (GskPath             *self,
 
   for (i = 0; i < self->n_contours; i++)
     {
-      if (!gsk_contour_foreach (self->contours[i], tolerance, func, user_data))
+      if (!gsk_contour_foreach (self->contours[i], func, user_data))
         return FALSE;
     }
 
   return TRUE;
 }
 
-/* path parser and utilities */
+/* }}} */
+/* {{{ Parser and utilities */
 
 static void
 skip_whitespace (const char **p)
@@ -1607,3 +1613,7 @@ error:
 
   return NULL;
 }
+
+/* }}} */
+
+/* vim:set foldmethod=marker expandtab: */

@@ -51,7 +51,6 @@ struct _GskContourClass
                                                  const GskStroke        *stroke,
                                                  GskBoundingBox         *bounds);
   gboolean              (* foreach)             (const GskContour       *contour,
-                                                 float                   tolerance,
                                                  GskPathForeachFunc      func,
                                                  gpointer                user_data);
   GskContour *          (* reverse)             (const GskContour       *contour);
@@ -169,7 +168,7 @@ convert_to_standard_contour (const GskContour *contour)
   GskPathBuilder *builder;
 
   builder = gsk_path_builder_new ();
-  gsk_contour_foreach (contour, 0.5, add_segment, builder);
+  gsk_contour_foreach (contour, add_segment, builder);
   return gsk_path_builder_free_to_path (builder);
 }
 
@@ -233,7 +232,7 @@ static void
 gsk_contour_print_default (const GskContour *contour,
                            GString          *string)
 {
-  gsk_contour_foreach (contour, 0.5, foreach_print, string);
+  gsk_contour_foreach (contour, foreach_print, string);
 }
 
 /* }}} */
@@ -295,7 +294,6 @@ gsk_standard_contour_get_size (const GskContour *contour)
 
 static gboolean
 gsk_standard_contour_foreach (const GskContour   *contour,
-                              float               tolerance,
                               GskPathForeachFunc  func,
                               gpointer            user_data)
 {
@@ -472,7 +470,7 @@ gsk_standard_contour_get_closest_point (const GskContour       *contour,
         {
           *out_dist = dist;
           result->idx = 0;
-          result->t = 0;
+          result->t = 1;
           return TRUE;
         }
 
@@ -1141,17 +1139,16 @@ gsk_circle_contour_get_stroke_bounds (const GskContour *contour,
   const GskCircleContour *self = (const GskCircleContour *) contour;
 
   gsk_bounding_box_init (bounds,
-                         &GRAPHENE_POINT_INIT (self->center.x - self->radius - stroke->line_width/2,
-                                               self->center.y - self->radius - stroke->line_width/2),
+                         &GRAPHENE_POINT_INIT (self->center.x - self->radius - stroke->line_width,
+                                               self->center.y - self->radius - stroke->line_width),
                          &GRAPHENE_POINT_INIT (self->center.x + self->radius + stroke->line_width/2,
-                                               self->center.y + self->radius + stroke->line_width/2));
+                                               self->center.y + self->radius + stroke->line_width));
 
   return TRUE;
 }
 
 static gboolean
 gsk_circle_contour_foreach (const GskContour   *contour,
-                            float               tolerance,
                             GskPathForeachFunc  func,
                             gpointer            user_data)
 {
@@ -1521,7 +1518,7 @@ gsk_rect_contour_get_stroke_bounds (const GskContour *contour,
   graphene_rect_t rect;
 
   graphene_rect_init (&rect, self->x, self->y, self->width, self->height);
-  graphene_rect_inset (&rect, - stroke->line_width / 2, - stroke->line_width / 2);
+  graphene_rect_inset (&rect, - stroke->line_width, - stroke->line_width);
   gsk_bounding_box_init_from_rect (bounds, &rect);
 
   return TRUE;
@@ -1529,7 +1526,6 @@ gsk_rect_contour_get_stroke_bounds (const GskContour *contour,
 
 static gboolean
 gsk_rect_contour_foreach (const GskContour   *contour,
-                          float               tolerance,
                           GskPathForeachFunc  func,
                           gpointer            user_data)
 {
@@ -2049,10 +2045,10 @@ gsk_rounded_rect_contour_get_stroke_bounds (const GskContour *contour,
 
   gsk_bounding_box_init_from_rect (&b, &self->rect.bounds);
   gsk_bounding_box_init (bounds,
-                         &GRAPHENE_POINT_INIT (b.min.x - stroke->line_width / 2,
-                                               b.min.y - stroke->line_width / 2),
-                         &GRAPHENE_POINT_INIT (b.max.x + stroke->line_width / 2,
-                                               b.max.y + stroke->line_width / 2));
+                         &GRAPHENE_POINT_INIT (b.min.x - stroke->line_width,
+                                               b.min.y - stroke->line_width),
+                         &GRAPHENE_POINT_INIT (b.max.x + stroke->line_width,
+                                               b.max.y + stroke->line_width));
 
   return TRUE;
 }
@@ -2079,7 +2075,6 @@ get_rounded_rect_points (const GskRoundedRect *rect,
 
 static gboolean
 gsk_rounded_rect_contour_foreach (const GskContour   *contour,
-                                  float               tolerance,
                                   GskPathForeachFunc  func,
                                   gpointer            user_data)
 {
@@ -2211,7 +2206,7 @@ gsk_rounded_rect_contour_init_curve (const GskContour *contour,
   data.idx = idx;
   data.count = 0;
 
-  gsk_contour_foreach (contour, 0.5, init_curve_cb, &data);
+  gsk_contour_foreach (contour, init_curve_cb, &data);
 }
 
 static void
@@ -2430,11 +2425,10 @@ gsk_contour_get_stroke_bounds (const GskContour *self,
 
 gboolean
 gsk_contour_foreach (const GskContour   *self,
-                     float               tolerance,
                      GskPathForeachFunc  func,
                      gpointer            user_data)
 {
-  return self->klass->foreach (self, tolerance, func, user_data);
+  return self->klass->foreach (self, func, user_data);
 }
 
 int

@@ -426,10 +426,23 @@ test_foreach (void)
   path2 = gsk_path_builder_free_to_path (builder);
   s2 = gsk_path_to_string (path2);
 
-  g_assert_cmpstr (sp, ==, s2);
+  /* We still end up with quads here, since GskPathBuilder aggressively reduces
+   * curves degrees.
+   */
+  g_assert_cmpstr (s, ==, s2);
 
   gsk_path_unref (path2);
   g_free (s2);
+
+  path2 = gsk_path_parse (sp);
+  s2 = gsk_path_to_string (path2);
+
+  g_assert_cmpstr (s, ==, s2);
+
+  gsk_path_unref (path2);
+  g_free (s2);
+
+  gsk_path_unref (path);
 }
 
 static void
@@ -773,7 +786,7 @@ test_rotated_arc (void)
 }
 
 static void
-test_rounded_rect (void)
+test_rounded_rect_basic (void)
 {
   GskRoundedRect rect;
   GskPathBuilder *builder;
@@ -813,7 +826,7 @@ test_rounded_rect (void)
 }
 
 static void
-test_rect (void)
+test_rect_in_fill (void)
 {
   graphene_rect_t rect;
   GskPathBuilder *builder;
@@ -849,7 +862,7 @@ test_rect (void)
 }
 
 static void
-test_circle (void)
+test_circle_basic (void)
 {
   GskPathBuilder *builder;
   GskPath *path, *path1, *path2, *path3, *path4, *path5, *path6;
@@ -1049,6 +1062,613 @@ test_circle_point (void)
   gsk_path_unref (path);
 }
 
+static void
+test_rect_plain (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_point_t pos;
+  graphene_vec2_t tan, v;
+  char *s;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rect (builder, &GRAPHENE_RECT_INIT (10, 10, 100, 200));
+  path = gsk_path_builder_free_to_path (builder);
+
+  s  = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 10 10 h 100 v 200 h -100 z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_true (gsk_path_measure_get_length (measure) == 600);
+
+  gsk_path_get_start_point (path, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (10, 10)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, -1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, 1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, -1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 1, 0)));
+
+  gsk_path_measure_get_point (measure, 100, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (110, 10)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, -1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, -1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, 1)));
+
+  gsk_path_measure_get_point (measure, 300, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (110, 210)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, 1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, -1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, -1, 0)));
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_rect_zero_height (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_point_t pos;
+  graphene_vec2_t tan, v;
+  char *s;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rect (builder, &GRAPHENE_RECT_INIT (10, 10, 100, 0));
+  path = gsk_path_builder_free_to_path (builder);
+
+  s  = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 10 10 h 100 v 0 h -100 z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_true (gsk_path_measure_get_length (measure) == 200);
+
+  gsk_path_measure_get_point (measure, 100, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (110, 10)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, -1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 1, 0)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, -1, 0)));
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_rect_zero_width (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_point_t pos;
+  graphene_vec2_t tan, v;
+  char *s;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rect (builder, &GRAPHENE_RECT_INIT (10, 10, 0, 100));
+  path = gsk_path_builder_free_to_path (builder);
+
+  s  = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 10 10 h 0 v 100 h -0 z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_true (gsk_path_measure_get_length (measure) == 200);
+
+  gsk_path_measure_get_point (measure, 100, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (10, 110)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, 1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, -1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, 1)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_init (&v, 0, -1)));
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_rect_zero (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_point_t pos;
+  graphene_vec2_t tan;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rect (builder, &GRAPHENE_RECT_INIT (10, 10, 0, 0));
+  path = gsk_path_builder_free_to_path (builder);
+  measure = gsk_path_measure_new (path);
+
+  g_assert_true (gsk_path_measure_get_length (measure) == 0);
+
+  gsk_path_measure_get_point (measure, 0, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_equal (&pos, &GRAPHENE_POINT_INIT (10, 10)));
+
+  gsk_path_point_get_tangent (&point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_equal (&tan, graphene_vec2_zero ()));
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+check_path_point (const GskPathPoint     *point,
+                  GskPath                *path,
+                  const graphene_point_t *pos,
+                  const graphene_vec2_t  *tan1,
+                  const graphene_vec2_t  *tan2,
+                  float                   k1,
+                  float                   k2)
+{
+  graphene_point_t p;
+  graphene_vec2_t tan;
+  float ka1, ka2;
+
+  gsk_path_point_get_position (point, path, &p);
+  g_assert_true (graphene_point_near (pos, &p, 0.0001));
+
+  gsk_path_point_get_tangent (point, path, GSK_PATH_FROM_START, &tan);
+  g_assert_true (graphene_vec2_near (tan1, &tan, 0.0001));
+
+  gsk_path_point_get_tangent (point, path, GSK_PATH_TO_END, &tan);
+  g_assert_true (graphene_vec2_near (tan2, &tan, 0.0001));
+
+  ka1 = gsk_path_point_get_curvature (point, path, GSK_PATH_FROM_START, NULL);
+  if (isfinite (k1) && isfinite (ka1))
+    g_assert_cmpfloat_with_epsilon (k1, ka1, 0.0001);
+  else
+    g_assert_true (isinf (k1) && isinf (ka1));
+
+  ka2 = gsk_path_point_get_curvature (point, path, GSK_PATH_TO_END, NULL);
+  if (isfinite (k2) && isfinite (ka2))
+    g_assert_cmpfloat_with_epsilon (k2, ka2, 0.0001);
+  else
+    g_assert_true (isinf (k2) && isinf (ka2));
+}
+
+static void
+test_rounded_rect_plain (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  GskRoundedRect rect;
+  graphene_vec2_t v1, v2;
+  graphene_point_t pos;
+  char *s;
+
+  rect.bounds = GRAPHENE_RECT_INIT (10, 10, 100, 200);
+  rect.corner[0] = GRAPHENE_SIZE_INIT (10, 10);
+  rect.corner[1] = GRAPHENE_SIZE_INIT (10, 10);
+  rect.corner[2] = GRAPHENE_SIZE_INIT (10, 10);
+  rect.corner[3] = GRAPHENE_SIZE_INIT (10, 10);
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rounded_rect (builder, &rect);
+  path = gsk_path_builder_free_to_path (builder);
+
+  s = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 20 10 L 100 10 O 110 10, 110 20, 0.707106769 L 110 200 O 110 210, 100 210, 0.707106769 L 20 210 O 10 210, 10 200, 0.707106769 L 10 20 O 10 10, 20 10, 0.707106769 Z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_cmpfloat_with_epsilon (gsk_path_measure_get_length (measure),
+                                  600 - 4 * 20 + 2 * M_PI * 10,
+                                  0.0001);
+
+  gsk_path_get_start_point (path, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (20, 10), 0.0001));
+
+  /* Checking the curvature with the measured points is difficult,
+   * because rounding might put us on the arc. Therefore, set points
+   * precisely for these checks.
+   */
+  point.contour = 0;
+  point.idx = 1;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (20, 10),
+                    graphene_vec2_init (&v1, 1, 0),
+                    graphene_vec2_init (&v2, 1, 0),
+                    0.1, 0);
+
+  gsk_path_measure_get_point (measure, 80, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (100, 10), 0.0001));
+
+  point.contour = 0;
+  point.idx = 2;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (100, 10),
+                    graphene_vec2_init (&v1, 1, 0),
+                    graphene_vec2_init (&v2, 1, 0),
+                    0, 0.1);
+
+  gsk_path_measure_get_point (measure, 80 + (2 * M_PI * 10)/4, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (110, 20), 0.0001));
+
+  point.contour = 0;
+  point.idx = 3;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (110, 20),
+                    graphene_vec2_init (&v1, 0, 1),
+                    graphene_vec2_init (&v2, 0, 1),
+                    0.1, 0);
+
+  gsk_path_measure_get_point (measure, 80 + (2 * M_PI * 10)/4 + 180, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (110, 200), 0.0001));
+
+  point.contour = 0;
+  point.idx = 4;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (110, 200),
+                    graphene_vec2_init (&v1, 0, 1),
+                    graphene_vec2_init (&v2, 0, 1),
+                    0, 0.1);
+
+  gsk_path_measure_get_point (measure, 80 + 180 + (2 * M_PI * 10)/2, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (100, 210), 0.00001));
+
+  point.contour = 0;
+  point.idx = 5;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (100, 210),
+                    graphene_vec2_init (&v1, -1, 0),
+                    graphene_vec2_init (&v2, -1, 0),
+                    0.1, 0);
+
+  gsk_path_measure_get_point (measure, 80 + 180 + 80 + (2 * M_PI * 10)/2, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (20, 210), 0.00001));
+
+  point.contour = 0;
+  point.idx = 6;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (20, 210),
+                    graphene_vec2_init (&v1, -1, 0),
+                    graphene_vec2_init (&v2, -1, 0),
+                    0, 0.1);
+
+  gsk_path_measure_get_point (measure, 80 + 180 + 80 + (2 * M_PI * 10)*3/4, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (10, 200), 0.00001));
+
+  point.contour = 0;
+  point.idx = 7;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (10, 200),
+                    graphene_vec2_init (&v1, 0, -1),
+                    graphene_vec2_init (&v2, 0, -1),
+                    0.1, 0);
+
+  gsk_path_measure_get_point (measure, 80 + 180 + 80 + 180 + (2 * M_PI * 10)*3/4, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (10, 20), 0.00001));
+
+  point.contour = 0;
+  point.idx = 8;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (10, 20),
+                    graphene_vec2_init (&v1, 0, -1),
+                    graphene_vec2_init (&v2, 0, -1),
+                    0, 0.1);
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_rounded_rect_tricky (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  GskRoundedRect rect;
+  graphene_vec2_t v1, v2;
+  graphene_point_t pos;
+  char *s;
+
+  rect.bounds = GRAPHENE_RECT_INIT (10, 10, 100, 200);
+  rect.corner[0] = GRAPHENE_SIZE_INIT (0, 0);
+  rect.corner[1] = GRAPHENE_SIZE_INIT (0, 100);
+  rect.corner[2] = GRAPHENE_SIZE_INIT (0, 100);
+  rect.corner[3] = GRAPHENE_SIZE_INIT (10, 10);
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rounded_rect (builder, &rect);
+  path = gsk_path_builder_free_to_path (builder);
+
+  s = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 10 10 L 110 10 L 110 110 L 110 210 L 20 210 O 10 210, 10 200, 0.707106769 L 10 10 Z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_cmpfloat_with_epsilon (gsk_path_measure_get_length (measure),
+                                  600 - 20 + (2 * M_PI * 10) / 4,
+                                  0.0001);
+
+  gsk_path_get_start_point (path, &point);
+  gsk_path_point_get_position (&point, path, &pos);
+  g_assert_true (graphene_point_near (&pos, &GRAPHENE_POINT_INIT (10, 10), 0.0001));
+
+  /* Checking the curvature with the measured points is difficult,
+   * because rounding might put us on the arc. Therefore, set points
+   * precisely for these checks.
+   */
+  point.contour = 0;
+  point.idx = 1;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (10, 10),
+                    graphene_vec2_init (&v1, 0, -1),
+                    graphene_vec2_init (&v2, 1, 0),
+                    0, 0);
+
+  point.contour = 0;
+  point.idx = 2;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (110, 10),
+                    graphene_vec2_init (&v2, 1, 0),
+                    graphene_vec2_init (&v1, 0, 1),
+                    0, 0);
+
+  point.contour = 0;
+  point.idx = 3;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (110, 110),
+                    graphene_vec2_init (&v1, 0, 1),
+                    graphene_vec2_init (&v2, 0, 1),
+                    0, 0);
+
+  point.contour = 0;
+  point.idx = 4;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (110, 210),
+                    graphene_vec2_init (&v1, 0, 1),
+                    graphene_vec2_init (&v2, -1, 0),
+                    0, 0);
+
+  point.contour = 0;
+  point.idx = 5;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (20, 210),
+                    graphene_vec2_init (&v1, -1, 0),
+                    graphene_vec2_init (&v2, -1, 0),
+                    0, 0.1);
+
+  point.contour = 0;
+  point.idx = 6;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (10, 200),
+                    graphene_vec2_init (&v2, 0, -1),
+                    graphene_vec2_init (&v2, 0, -1),
+                    0.1, 0);
+
+  point.contour = 0;
+  point.idx = 7;
+  point.t = 0;
+  check_path_point (&point, path,
+                    &GRAPHENE_POINT_INIT (10, 10),
+                    graphene_vec2_init (&v1, 0, -1),
+                    graphene_vec2_init (&v2, 1, 0),
+                    0, 0);
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_rounded_rect_parse (void)
+{
+  GskRoundedRect rr;
+  GskPathBuilder *builder;
+  GskPath *path, *path2;
+  char *s;
+
+  rr.bounds = GRAPHENE_RECT_INIT (10, 10, 100, 111);
+  rr.corner[GSK_CORNER_TOP_LEFT] = GRAPHENE_SIZE_INIT (2, 4);
+  rr.corner[GSK_CORNER_TOP_RIGHT] = GRAPHENE_SIZE_INIT (6, 8);
+  rr.corner[GSK_CORNER_BOTTOM_RIGHT] = GRAPHENE_SIZE_INIT (10, 12);
+  rr.corner[GSK_CORNER_BOTTOM_LEFT] = GRAPHENE_SIZE_INIT (14, 16);
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_rounded_rect (builder, &rr);
+  path = gsk_path_builder_free_to_path (builder);
+
+  s = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 12 10 L 104 10 O 110 10, 110 18, 0.707106769 L 110 109 O 110 121, 100 121, 0.707106769 L 24 121 O 10 121, 10 105, 0.707106769 L 10 14 O 10 10, 12 10, 0.707106769 Z");
+
+  path2 = gsk_path_parse (s);
+  g_free (s);
+
+  s = gsk_path_to_string (path2);
+  g_assert_cmpstr (s, ==, "M 12 10 L 104 10 O 110 10, 110 18, 0.707106769 L 110 109 O 110 121, 100 121, 0.707106769 L 24 121 O 10 121, 10 105, 0.707106769 L 10 14 O 10 10, 12 10, 0.707106769 Z");
+  g_free (s);
+
+  gsk_path_unref (path);
+  gsk_path_unref (path2);
+}
+
+static void
+test_circle_plain (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_vec2_t v1;
+  graphene_point_t pos, center;
+  char *s;
+  float angle, radius;
+
+  center = GRAPHENE_POINT_INIT (100, 100);
+  radius = 10;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_circle (builder, &center, radius);
+  path = gsk_path_builder_free_to_path (builder);
+
+  s = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 110 100 o 0 10, -10 10, 0.707106769 o -10 0, -10 -10, 0.707106769 o 0 -10, 10 -10, 0.707106769 o 10 0, 10 10, 0.707106769 z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_cmpfloat_with_epsilon (gsk_path_measure_get_length (measure),
+                                  2 * M_PI * radius,
+                                  0.0001);
+
+  gsk_path_get_start_point (path, &point);
+  g_assert_true (point.idx == 1 && point.t == 0);
+
+  gsk_path_get_end_point (path, &point);
+  g_assert_true (point.idx == 5 && point.t == 1);
+
+  for (int i = 0; i < 8; i++)
+    {
+      angle = 2 * M_PI * (i + 1) / 8.f;
+      gsk_path_measure_get_point (measure, angle * radius, &point);
+
+      pos = GRAPHENE_POINT_INIT (100 + cosf (angle) * radius, 100 + sinf (angle) * radius);
+      graphene_vec2_init (&v1, - sinf (angle), cosf (angle));
+
+      check_path_point (&point, path,
+                        &pos,
+                        &v1, &v1,
+                        0.1, 0.1);
+    }
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
+static void
+test_circle_zero (void)
+{
+  GskPathBuilder *builder;
+  GskPath *path;
+  GskPathMeasure *measure;
+  GskPathPoint point;
+  graphene_vec2_t v1;
+  graphene_point_t pos, center;
+  char *s;
+  float angle, radius;
+
+  center = GRAPHENE_POINT_INIT (100, 100);
+  radius = 0;
+
+  builder = gsk_path_builder_new ();
+  gsk_path_builder_add_circle (builder, &center, radius);
+  path = gsk_path_builder_free_to_path (builder);
+
+  s = gsk_path_to_string (path);
+  g_assert_cmpstr (s, ==, "M 100 100 o 0 0, 0 0, 0.707106769 o 0 0, 0 0, 0.707106769 o 0 0, 0 0, 0.707106769 o 0 0, 0 0, 0.707106769 z");
+  g_free (s);
+
+  measure = gsk_path_measure_new (path);
+
+  g_assert_cmpfloat_with_epsilon (gsk_path_measure_get_length (measure),
+                                  2 * M_PI * radius,
+                                  0.0001);
+
+  for (int i = 0; i < 8; i++)
+    {
+      angle = 2 * M_PI * (i + 1) / 8.f;
+      gsk_path_measure_get_point (measure, angle * radius, &point);
+
+      pos = center;
+      graphene_vec2_init (&v1, 0, 0);
+
+      check_path_point (&point, path,
+                        &pos,
+                        &v1, &v1,
+                        INFINITY, INFINITY);
+    }
+
+  gsk_path_measure_unref (measure);
+  gsk_path_unref (path);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -1056,7 +1676,7 @@ main (int argc, char *argv[])
 
   g_test_add_func ("/path/rsvg-parse", test_rsvg_parse);
   g_test_add_func ("/path/empty", test_empty_path);
-  g_test_add_func ("/path/rect-path", test_rect_path);
+  g_test_add_func ("/path/rect/path", test_rect_path);
   g_test_add_func ("/path/foreach", test_foreach);
   g_test_add_func ("/path/point", test_path_point);
   g_test_add_func ("/path/segments", test_path_segments);
@@ -1064,12 +1684,21 @@ main (int argc, char *argv[])
   g_test_add_func ("/path/unclosed-in-fill", test_unclosed_in_fill);
   g_test_add_func ("/path/builder/add", test_path_builder_add);
   g_test_add_func ("/path/rotated-arc", test_rotated_arc);
-  g_test_add_func ("/path/rounded-rect", test_rounded_rect);
-  g_test_add_func ("/path/rect", test_rect);
-  g_test_add_func ("/path/circle", test_circle);
+  g_test_add_func ("/path/rounded-rect/basic", test_rounded_rect_basic);
+  g_test_add_func ("/path/rect/in-fill", test_rect_in_fill);
+  g_test_add_func ("/path/circle/basic", test_circle_basic);
   g_test_add_func ("/path/length", test_length);
   g_test_add_func ("/path/rect/segment", test_rect_segment);
-  g_test_add_func ("/path/circle-point", test_circle_point);
+  g_test_add_func ("/path/circle/point", test_circle_point);
+  g_test_add_func ("/path/rect/plain", test_rect_plain);
+  g_test_add_func ("/path/rect/zero-height", test_rect_zero_height);
+  g_test_add_func ("/path/rect/zero-width", test_rect_zero_width);
+  g_test_add_func ("/path/rect/zero", test_rect_zero);
+  g_test_add_func ("/path/rounded-rect/plain", test_rounded_rect_plain);
+  g_test_add_func ("/path/rounded-rect/tricky", test_rounded_rect_tricky);
+  g_test_add_func ("/path/rounded-rect/parse", test_rounded_rect_parse);
+  g_test_add_func ("/path/circle/plain", test_circle_plain);
+  g_test_add_func ("/path/circle/zero", test_circle_zero);
 
   return g_test_run ();
 }

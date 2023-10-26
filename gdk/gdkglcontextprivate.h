@@ -23,6 +23,7 @@
 #include "gdkglcontext.h"
 #include "gdkdrawcontextprivate.h"
 #include "gdkglversionprivate.h"
+#include "gdkdmabufprivate.h"
 
 G_BEGIN_DECLS
 
@@ -147,6 +148,8 @@ void                    gdk_gl_context_label_object_printf      (GdkGLContext   
                                                                  const char      *format,
                                                                 ...)  G_GNUC_PRINTF (4, 5);
 
+const char *            gdk_gl_context_get_glsl_version_string  (GdkGLContext    *self);
+
 gboolean                gdk_gl_context_has_debug                (GdkGLContext    *self) G_GNUC_PURE;
 
 gboolean                gdk_gl_context_use_es_bgra              (GdkGLContext    *context);
@@ -155,7 +158,22 @@ gboolean                gdk_gl_context_has_vertex_half_float    (GdkGLContext   
 
 gboolean                gdk_gl_context_has_sync                 (GdkGLContext    *self) G_GNUC_PURE;
 
+gboolean                gdk_gl_context_has_bgra                 (GdkGLContext    *self) G_GNUC_PURE;
+
+gboolean                gdk_gl_context_has_vertex_arrays        (GdkGLContext    *self) G_GNUC_PURE;
+
+gboolean                gdk_gl_context_has_image_storage        (GdkGLContext    *self) G_GNUC_PURE;
+
 double                  gdk_gl_context_get_scale                (GdkGLContext    *self);
 
-G_END_DECLS
+guint                   gdk_gl_context_import_dmabuf            (GdkGLContext    *self,
+                                                                 int              width,
+                                                                 int              height,
+                                                                 const GdkDmabuf *dmabuf,
+                                                                 int              target);
 
+gboolean                gdk_gl_context_export_dmabuf            (GdkGLContext    *self,
+                                                                 unsigned int     texture_id,
+                                                                 GdkDmabuf       *dmabuf);
+
+G_END_DECLS

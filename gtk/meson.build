@@ -310,6 +310,7 @@ gtk_public_sources = files([
   'gtkpopover.c',
   'gtkpopovermenu.c',
   'gtkpopovermenubar.c',
+  'gtkprintdialog.c',
   'gtkprogressbar.c',
   'gtkpropertylookuplistmodel.c',
   'gtkrange.c',
@@ -549,6 +550,7 @@ gtk_public_headers = files([
   'gtkpopover.h',
   'gtkpopovermenu.h',
   'gtkpopovermenubar.h',
+  'gtkprintdialog.h',
   'gtkprogressbar.h',
   'gtkrange.h',
   'gtkrecentmanager.h',
@@ -853,20 +855,27 @@ else
 endif
 
 foreach lang : [
+    'bn',
     'de',
     'da',
     'fr',
     'es',
+    'et',
+    'fi',
+    'hi',
     'hu',
     'it',
+    'ja',
     'ko',
     'lt',
     'ms',
+    'nb',
     'nl',
     'pl',
     'pt',
     'ru',
     'sv',
+    'th',
     'uk',
     'zh'
   ]

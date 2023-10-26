@@ -83,6 +83,7 @@
 #include "gdkmemorytextureprivate.h"
 #include "gdkprofilerprivate.h"
 #include "gdkglversionprivate.h"
+#include "gdkdmabufformatsprivate.h"
 
 #include "gdkprivate.h"
 
@@ -93,6 +94,10 @@
 #include <epoxy/gl.h>
 #ifdef HAVE_EGL
 #include <epoxy/egl.h>
+#endif
+
+#ifdef HAVE_DMABUF
+#include <drm_fourcc.h>
 #endif
 
 #include <math.h>
@@ -109,6 +114,8 @@ typedef struct {
   guint has_sync : 1;
   guint has_unpack_subimage : 1;
   guint has_debug_output : 1;
+  guint has_bgra : 1;
+  guint has_image_storage : 1;
   guint extensions_checked : 1;
   guint debug_enabled : 1;
   guint forward_compatible : 1;
@@ -1531,11 +1538,13 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
       priv->has_unpack_subimage = gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 0)) ||
                                   epoxy_has_gl_extension ("GL_EXT_unpack_subimage");
       priv->has_khr_debug = epoxy_has_gl_extension ("GL_KHR_debug");
+      priv->has_bgra = epoxy_has_gl_extension ("GL_EXT_texture_format_BGRA8888");
     }
   else
     {
       priv->has_unpack_subimage = TRUE;
       priv->has_khr_debug = epoxy_has_gl_extension ("GL_KHR_debug");
+      priv->has_bgra = TRUE;
 
       /* We asked for a core profile, but we didn't get one, so we're in legacy mode */
       if (!gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 2)))
@@ -1555,6 +1564,8 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
                    epoxy_has_gl_extension ("GL_ARB_sync") ||
                    epoxy_has_gl_extension ("GL_APPLE_sync");
 
+  priv->has_image_storage = epoxy_has_gl_extension ("GL_EXT_EGL_image_storage");
+
 #ifdef G_ENABLE_DEBUG
   {
     int max_texture_size;
@@ -1566,6 +1577,8 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
                        "* Extensions checked:\n"
                        " - GL_KHR_debug: %s\n"
                        " - GL_EXT_unpack_subimage: %s\n"
+                       " - GL_EXT_texture_format_BGRA8888: %s\n"
+                       " - GL_EXT_EGL_image_storage: %s\n"
                        " - half float: %s\n"
                        " - sync: %s",
                        gdk_gl_context_get_use_es (context) ? "OpenGL ES" : "OpenGL",
@@ -1575,6 +1588,8 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
                        max_texture_size,
                        priv->has_khr_debug ? "yes" : "no",
                        priv->has_unpack_subimage ? "yes" : "no",
+                       priv->has_bgra ? "yes" : "no",
+                       priv->has_image_storage ? "yes" : "no",
                        priv->has_half_float ? "yes" : "no",
                        priv->has_sync ? "yes" : "no");
   }
@@ -1715,6 +1730,56 @@ gdk_gl_context_get_version (GdkGLContext *context,
     *minor = gdk_gl_version_get_minor (&priv->gl_version);
 }
 
+const char *
+gdk_gl_context_get_glsl_version_string (GdkGLContext *self)
+{
+  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
+
+  if (priv->api == GDK_GL_API_GL)
+    {
+      if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 6)))
+        return "#version 460";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 5)))
+        return "#version 450";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 4)))
+        return "#version 440";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 3)))
+        return "#version 430";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 2)))
+        return "#version 420";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 1)))
+        return "#version 410";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (4, 0)))
+        return "#version 400";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 3)))
+        return "#version 330";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 2)))
+        return "#version 150";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 1)))
+        return "#version 140";
+      else
+        return "#version 130";
+    }
+  else if (priv->api == GDK_GL_API_GLES)
+    {
+      if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 2)))
+        return "#version 320 es";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 1)))
+        return "#version 310 es";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 0)))
+        return "#version 300 es";
+      else if (gdk_gl_version_greater_equal (&priv->gl_version, &GDK_GL_VERSION_INIT (3, 0)))
+        return "#version 300 es";
+      else
+        return "#version 100";
+    }
+  else
+    {
+      /* must be realized to be called */
+      g_assert_not_reached ();
+    }
+}
+
 /**
  * gdk_gl_context_clear_current:
  *
@@ -1812,6 +1877,44 @@ gdk_gl_context_has_sync (GdkGLContext *self)
   return priv->has_sync;
 }
 
+/* Return if GL_BGRA works with glTexImage2D */
+gboolean
+gdk_gl_context_has_bgra (GdkGLContext *self)
+{
+  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
+
+  return priv->has_bgra;
+}
+
+/* Return if glGenVertexArrays, glBindVertexArray and glDeleteVertexArrays
+ * can be used
+ */
+gboolean
+gdk_gl_context_has_vertex_arrays (GdkGLContext *self)
+{
+  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
+
+  switch (priv->api)
+    {
+    case GDK_GL_API_GL:
+      return TRUE;
+
+    case GDK_GL_API_GLES:
+      return gdk_gl_version_get_major (&priv->gl_version) >= 3;
+
+    default:
+      g_return_val_if_reached (FALSE);
+    }
+}
+
+gboolean
+gdk_gl_context_has_image_storage (GdkGLContext *self)
+{
+  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
+
+  return priv->has_image_storage;
+}
+
 /* This is currently private! */
 /* When using GL/ES, don't flip the 'R' and 'B' bits on Windows/ANGLE for glReadPixels() */
 gboolean
@@ -1891,4 +1994,202 @@ gdk_gl_backend_use (GdkGLBackend backend_type)
     }
 
   g_assert (the_gl_backend_type == backend_type);
+}
+
+guint
+gdk_gl_context_import_dmabuf (GdkGLContext    *self,
+                              int              width,
+                              int              height,
+                              const GdkDmabuf *dmabuf,
+                              int              target)
+{
+#if defined(HAVE_EGL) && defined(HAVE_DMABUF)
+  GdkDisplay *display = gdk_gl_context_get_display (self);
+  EGLDisplay egl_display = gdk_display_get_egl_display (display);
+  EGLint attribs[64];
+  int i;
+  EGLImage image;
+  guint texture_id;
+
+  g_return_val_if_fail (GDK_IS_GL_CONTEXT (self), 0);
+  g_return_val_if_fail (width > 0, 0);
+  g_return_val_if_fail (height > 0, 0);
+  g_return_val_if_fail (1 <= dmabuf->n_planes && dmabuf->n_planes <= 4, 0);
+  g_return_val_if_fail (target == GL_TEXTURE_2D || target == GL_TEXTURE_EXTERNAL_OES, 0);
+
+  if (egl_display == EGL_NO_DISPLAY || !display->have_egl_dma_buf_import)
+    return 0;
+
+  GDK_DEBUG (DMABUF,
+             "Importing dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %u) into GL",
+             (char *) &dmabuf->fourcc, dmabuf->modifier, dmabuf->n_planes);
+
+  i = 0;
+  attribs[i++] = EGL_IMAGE_PRESERVED_KHR;
+  attribs[i++] = EGL_TRUE;
+  attribs[i++] = EGL_WIDTH;
+  attribs[i++] = width;
+  attribs[i++] = EGL_HEIGHT;
+  attribs[i++] = height;
+  attribs[i++] = EGL_LINUX_DRM_FOURCC_EXT;
+  attribs[i++] = dmabuf->fourcc;
+
+#define ADD_PLANE(plane) \
+  { \
+    if (dmabuf->modifier != DRM_FORMAT_MOD_INVALID) \
+      { \
+        attribs[i++] = EGL_DMA_BUF_PLANE## plane ##_MODIFIER_LO_EXT; \
+        attribs[i++] = dmabuf->modifier & 0xFFFFFFFF; \
+        attribs[i++] = EGL_DMA_BUF_PLANE## plane ## _MODIFIER_HI_EXT; \
+        attribs[i++] = dmabuf->modifier >> 32; \
+      } \
+    attribs[i++] = EGL_DMA_BUF_PLANE## plane ##_FD_EXT; \
+    attribs[i++] = dmabuf->planes[plane].fd; \
+    attribs[i++] = EGL_DMA_BUF_PLANE## plane ##_PITCH_EXT; \
+    attribs[i++] = dmabuf->planes[plane].stride; \
+    attribs[i++] = EGL_DMA_BUF_PLANE## plane ##_OFFSET_EXT; \
+    attribs[i++] = dmabuf->planes[plane].offset; \
+  }
+
+  ADD_PLANE (0);
+
+  if (dmabuf->n_planes > 1) ADD_PLANE (1);
+  if (dmabuf->n_planes > 2) ADD_PLANE (2);
+  if (dmabuf->n_planes > 3) ADD_PLANE (3);
+
+  attribs[i++] = EGL_NONE;
+
+  image = eglCreateImageKHR (egl_display,
+                             EGL_NO_CONTEXT,
+                             EGL_LINUX_DMA_BUF_EXT,
+                             (EGLClientBuffer)NULL,
+                             attribs);
+
+  if (image == EGL_NO_IMAGE)
+    {
+      GDK_DEBUG (DMABUF, "Creating EGLImage for dmabuf failed: %#x", eglGetError ());
+      return 0;
+    }
+
+  glGenTextures (1, &texture_id);
+  glBindTexture (target, texture_id);
+  glEGLImageTargetTexture2DOES (target, image);
+  glTexParameteri (target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri (target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+  eglDestroyImageKHR (egl_display, image);
+
+  return texture_id;
+#else
+  return 0;
+#endif
+}
+
+gboolean
+gdk_gl_context_export_dmabuf (GdkGLContext *self,
+                              unsigned int  texture_id,
+                              GdkDmabuf    *dmabuf)
+{
+#if defined(HAVE_EGL) && defined(HAVE_DMABUF)
+  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
+  GdkDisplay *display = gdk_gl_context_get_display (self);
+  EGLDisplay egl_display = gdk_display_get_egl_display (display);
+  EGLContext egl_context = priv->egl_context;
+  EGLint attribs[10];
+  EGLImage image;
+  gboolean result = FALSE;
+  int i;
+  int fourcc;
+  int n_planes;
+  guint64 modifier;
+  int fds[GDK_DMABUF_MAX_PLANES];
+  int strides[GDK_DMABUF_MAX_PLANES];
+  int offsets[GDK_DMABUF_MAX_PLANES];
+
+  g_return_val_if_fail (GDK_IS_GL_CONTEXT (self), FALSE);
+  g_return_val_if_fail (texture_id > 0, FALSE);
+  g_return_val_if_fail (dmabuf != NULL, FALSE);
+
+  if (egl_display == EGL_NO_DISPLAY || !display->have_egl_dma_buf_export)
+    return 0;
+
+  GDK_DEBUG (DMABUF, "Exporting GL texture to dmabuf");
+
+  i = 0;
+  attribs[i++] = EGL_IMAGE_PRESERVED_KHR;
+  attribs[i++] = EGL_TRUE;
+
+  attribs[i++] = EGL_NONE;
+
+  image = eglCreateImageKHR (egl_display,
+                             egl_context,
+                             EGL_GL_TEXTURE_2D_KHR,
+                             (EGLClientBuffer)GUINT_TO_POINTER (texture_id),
+                             attribs);
+
+  if (image == EGL_NO_IMAGE)
+    {
+      GDK_DEBUG (DMABUF, "Creating EGLImage for dmabuf failed: %#x", eglGetError ());
+      return FALSE;
+    }
+
+  if (!eglExportDMABUFImageQueryMESA (egl_display,
+                                      image,
+                                      &fourcc,
+                                      &n_planes,
+                                      &modifier))
+    {
+      GDK_DEBUG (DMABUF, "eglExportDMABUFImageQueryMESA failed: %#x", eglGetError ());
+      goto out;
+    }
+
+  if (n_planes < 1 || n_planes > GDK_DMABUF_MAX_PLANES)
+    {
+      GDK_DEBUG (DMABUF, "dmabufs with %d planes are not supported", n_planes);
+      goto out;
+    }
+
+  if (!eglExportDMABUFImageMESA (egl_display,
+                                 image,
+                                 fds,
+                                 strides,
+                                 offsets))
+    {
+      g_warning ("eglExportDMABUFImage failed: %#x", eglGetError ());
+      goto out;
+    }
+
+  for (i = 0; i < n_planes; i++)
+    {
+      if (fds[i] == -1)
+        {
+          g_warning ("dmabuf plane %d has no file descriptor", i);
+          goto out;
+        }
+    }
+
+  dmabuf->fourcc = (guint32)fourcc;
+  dmabuf->modifier = modifier;
+  dmabuf->n_planes = n_planes;
+
+  for (i = 0; i < n_planes; i++)
+    {
+      dmabuf->planes[i].fd = fds[i];
+      dmabuf->planes[i].stride = (int) strides[i];
+      dmabuf->planes[i].offset = (int) offsets[i];
+    }
+
+  GDK_DEBUG (DMABUF,
+             "Exported GL texture to dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %d)",
+             (char *)&fourcc, modifier, n_planes);
+
+  result = TRUE;
+
+out:
+  eglDestroyImageKHR (egl_display, image);
+
+  return result;
+#else
+  return FALSE;
+#endif
 }

@@ -117,6 +117,8 @@ static const GdkDebugKey gdk_debug_keys[] = {
   { "vulkan",          GDK_DEBUG_VULKAN, "Information about Vulkan" },
   { "selection",       GDK_DEBUG_SELECTION, "Information about selections" },
   { "clipboard",       GDK_DEBUG_CLIPBOARD, "Information about clipboards" },
+  { "dmabuf",          GDK_DEBUG_DMABUF, "Information about dmabuf buffers" },
+
   { "nograbs",         GDK_DEBUG_NOGRABS, "Disable pointer and keyboard grabs (X11)", TRUE },
   { "portals",         GDK_DEBUG_PORTALS, "Force use of portals", TRUE },
   { "no-portals",      GDK_DEBUG_NO_PORTALS, "Disable use of portals", TRUE },
@@ -133,6 +135,7 @@ static const GdkDebugKey gdk_debug_keys[] = {
   { "default-settings",GDK_DEBUG_DEFAULT_SETTINGS, "Force default values for xsettings", TRUE },
   { "high-depth",      GDK_DEBUG_HIGH_DEPTH, "Use high bit depth rendering if possible", TRUE },
   { "no-vsync",        GDK_DEBUG_NO_VSYNC, "Repaint instantly (uses 100% CPU with animations)", TRUE },
+  { "dmabuf-disable",  GDK_DEBUG_DMABUF_DISABLE, "Disable dmabuf support", TRUE },
 };
 
 
@@ -263,7 +266,7 @@ gdk_parse_debug_var (const char        *variable,
         if (debug_enabled || keys[i].always_enabled)
           fprintf (stderr, "  %s%*s%s\n", keys[i].key, (int)(max_width - strlen (keys[i].key)), " ", keys[i].help);
       }
-      fprintf (stderr, "  %s%*s%s\n", "all", max_width - 3, " ", "Enable all values");
+      fprintf (stderr, "  %s%*s%s\n", "all", max_width - 3, " ", "Enable all values. Other given values are subtracted");
       fprintf (stderr, "  %s%*s%s\n", "help", max_width - 4, " ", "Print this help");
       fprintf (stderr, "\nMultiple values can be given, separated by : or space.\n");
     }

@@ -282,7 +282,10 @@ snapshot_attachments (const GskGLAttachmentState *state,
         {
           bind[count].id = state->textures[i].id;
           bind[count].texture = state->textures[i].texture;
-          bind[count].sampler = state->textures[i].sampler;
+          if (state->textures[i].target == GL_TEXTURE_EXTERNAL_OES)
+            bind[count].sampler = SAMPLER_EXTERNAL;
+          else
+            bind[count].sampler = state->textures[i].sampler;
           count++;
         }
     }
@@ -1070,7 +1073,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glBlendEquation (GL_FUNC_ADD);
 
-  if (!gdk_gl_context_get_use_es (self->context))
+  if (gdk_gl_context_has_vertex_arrays (self->context))
     {
       glGenVertexArrays (1, &vao_id);
       glBindVertexArray (vao_id);
@@ -1190,12 +1193,23 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
                           s->sync = NULL;
                         }
 
-                      glBindTexture (GL_TEXTURE_2D, bind->id);
+                      if (bind->sampler == SAMPLER_EXTERNAL)
+                        glBindTexture (GL_TEXTURE_EXTERNAL_OES, bind->id);
+                      else
+                        glBindTexture (GL_TEXTURE_2D, bind->id);
                       textures[bind->texture] = bind->id;
                       if (!self->has_samplers)
                         {
-                          glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter_from_index (bind->sampler / GSK_GL_N_FILTERS));
-                          glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter_from_index (bind->sampler % GSK_GL_N_FILTERS));
+                          if (bind->sampler == SAMPLER_EXTERNAL)
+                            {
+                              glTexParameteri (GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                              glTexParameteri (GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                            }
+                          else
+                            {
+                              glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter_from_index (bind->sampler / GSK_GL_N_FILTERS));
+                              glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter_from_index (bind->sampler % GSK_GL_N_FILTERS));
+                            }
                         }
                     }
 
@@ -1205,8 +1219,16 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
                         glBindSampler (bind->texture, self->samplers[bind->sampler]);
                       else
                         {
-                          glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter_from_index (bind->sampler / GSK_GL_N_FILTERS));
-                          glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter_from_index (bind->sampler % GSK_GL_N_FILTERS));
+                          if (bind->sampler == SAMPLER_EXTERNAL)
+                            {
+                              glTexParameteri (GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                              glTexParameteri (GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                            }
+                          else
+                            {
+                              glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter_from_index (bind->sampler / GSK_GL_N_FILTERS));
+                              glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter_from_index (bind->sampler % GSK_GL_N_FILTERS));
+                            }
                         }
                       samplers[bind->texture] = bind->sampler;
                     }
@@ -1257,7 +1279,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
     }
 
   glDeleteBuffers (1, &vbo_id);
-  if (!gdk_gl_context_get_use_es (self->context))
+  if (gdk_gl_context_has_vertex_arrays (self->context))
     glDeleteVertexArrays (1, &vao_id);
 
   gdk_profiler_set_int_counter (self->metrics.n_binds, n_binds);
@@ -1324,7 +1346,7 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
       if (self->attachments->textures[i].id != 0)
         {
           glActiveTexture (GL_TEXTURE0 + i);
-          glBindTexture (GL_TEXTURE_2D, 0);
+          glBindTexture (self->attachments->textures[i].target, 0);
 
           self->attachments->textures[i].id = 0;
           self->attachments->textures[i].changed = FALSE;
@@ -1401,7 +1423,7 @@ gsk_gl_command_queue_create_texture (GskGLCommandQueue *self,
 
   glActiveTexture (GL_TEXTURE0);
   glBindTexture (GL_TEXTURE_2D, texture_id);
- 
+
   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1429,8 +1451,9 @@ gsk_gl_command_queue_create_texture (GskGLCommandQueue *self,
   }
 
   /* Restore the previous texture if it was set */
-  if (self->attachments->textures[0].id != 0)
-    glBindTexture (GL_TEXTURE_2D, self->attachments->textures[0].id);
+  if (self->attachments->textures[0].id != 0 &&
+      self->attachments->textures[0].target == GL_TEXTURE_2D)
+    glBindTexture (self->attachments->textures[0].target, self->attachments->textures[0].id);
 
   return (int)texture_id;
 }
@@ -1450,9 +1473,7 @@ gsk_gl_command_queue_create_framebuffer (GskGLCommandQueue *self)
 
 static GdkMemoryFormat
 memory_format_gl_format (GdkMemoryFormat  data_format,
-                         gboolean         use_es,
-                         guint            major,
-                         guint            minor,
+                         GdkGLContext    *context,
                          guint           *gl_internalformat,
                          guint           *gl_format,
                          guint           *gl_type,
@@ -1462,9 +1483,7 @@ memory_format_gl_format (GdkMemoryFormat  data_format,
 
   /* First, try the format itself */
   if (gdk_memory_format_gl_format (data_format,
-                                   use_es,
-                                   major,
-                                   minor,
+                                   context,
                                    gl_internalformat,
                                    gl_format,
                                    gl_type,
@@ -1480,9 +1499,7 @@ memory_format_gl_format (GdkMemoryFormat  data_format,
       case GDK_MEMORY_FLOAT16:
         data_format = GDK_MEMORY_R16G16B16A16_FLOAT_PREMULTIPLIED;
         if (gdk_memory_format_gl_format (data_format,
-                                         use_es,
-                                         major,
-                                         minor,
+                                         context,
                                          gl_internalformat,
                                          gl_format,
                                          gl_type,
@@ -1493,9 +1510,7 @@ memory_format_gl_format (GdkMemoryFormat  data_format,
       case GDK_MEMORY_U16:
         data_format = GDK_MEMORY_R16G16B16A16_PREMULTIPLIED;
         if (gdk_memory_format_gl_format (data_format,
-                                         use_es,
-                                         major,
-                                         minor,
+                                         context,
                                          gl_internalformat,
                                          gl_format,
                                          gl_type,
@@ -1517,9 +1532,7 @@ memory_format_gl_format (GdkMemoryFormat  data_format,
     {
       data_format = GDK_MEMORY_R32G32B32A32_FLOAT_PREMULTIPLIED;
       if (gdk_memory_format_gl_format (data_format,
-                                       use_es,
-                                       major,
-                                       minor,
+                                       context,
                                        gl_internalformat,
                                        gl_format,
                                        gl_type,
@@ -1530,9 +1543,7 @@ memory_format_gl_format (GdkMemoryFormat  data_format,
   /* If all else fails, pick the one format that's always supported */
   data_format = GDK_MEMORY_R8G8B8A8_PREMULTIPLIED;
   if (!gdk_memory_format_gl_format (data_format,
-                                    use_es,
-                                    major,
-                                    minor,
+                                    context,
                                     gl_internalformat,
                                     gl_format,
                                     gl_type,
@@ -1561,19 +1572,13 @@ gsk_gl_command_queue_do_upload_texture_chunk (GskGLCommandQueue *self,
   GLenum gl_type;
   GLint gl_swizzle[4];
   gsize bpp;
-  gboolean use_es;
-  int major, minor;
 
-  use_es = gdk_gl_context_get_use_es (self->context);
-  gdk_gl_context_get_version (self->context, &major, &minor);
   data_format = gdk_texture_get_format (texture);
   width = gdk_texture_get_width (texture);
   height = gdk_texture_get_height (texture);
 
   data_format = memory_format_gl_format (data_format,
-                                         use_es,
-                                         major,
-                                         minor,
+                                         self->context,
                                          &gl_internalformat,
                                          &gl_format,
                                          &gl_type,
@@ -1614,7 +1619,7 @@ gsk_gl_command_queue_do_upload_texture_chunk (GskGLCommandQueue *self,
   /* Only apply swizzle if really needed, might not even be
    * supported if default values are set
    */
-  if (gl_swizzle[0] != GL_RED || gl_swizzle[1] != GL_GREEN || gl_swizzle[2] != GL_BLUE)
+  if (gl_swizzle[0] != GL_RED || gl_swizzle[1] != GL_GREEN || gl_swizzle[2] != GL_BLUE || gl_swizzle[3] != GL_ALPHA)
     {
       /* Set each channel independently since GLES 3.0 doesn't support the iv method */
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, gl_swizzle[0]);
@@ -1638,9 +1643,7 @@ gsk_gl_command_queue_upload_texture_chunks (GskGLCommandQueue    *self,
   GLenum gl_format;
   GLenum gl_type;
   GLint gl_swizzle[4];
-  gboolean use_es;
   int texture_id;
-  int major, minor;
 
   g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
 
@@ -1673,13 +1676,9 @@ gsk_gl_command_queue_upload_texture_chunks (GskGLCommandQueue    *self,
   glBindTexture (GL_TEXTURE_2D, texture_id);
 
   /* Initialize the texture */
-  use_es = gdk_gl_context_get_use_es (self->context);
-  gdk_gl_context_get_version (self->context, &major, &minor);
   data_format = gdk_texture_get_format (chunks[0].texture);
   data_format = memory_format_gl_format (data_format,
-                                         use_es,
-                                         major,
-                                         minor,
+                                         self->context,
                                          &gl_internalformat,
                                          &gl_format,
                                          &gl_type,

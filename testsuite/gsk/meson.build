@@ -70,6 +70,7 @@ compare_render_tests = [
   'mask-clipped-inverted-alpha',
   'mask-modes',
   'mask-modes-with-alpha',
+  'mask-texture-color-alpha',
   'nested-rounded-clips',
   'opacity_clip',
   'opacity-overdraw',
@@ -97,6 +98,7 @@ compare_render_tests = [
   'shadow-opacity',
   'shrink-rounded-border',
   'stroke',
+  'texture-scale-filters-3d',
   'texture-scale-magnify-10000x',
   'texture-scale-magnify-rotate',
   'texture-scale-stripes',
@@ -372,7 +374,7 @@ endforeach
 tests = [
   ['transform'],
   ['shader'],
-  ['path'],
+  ['path', [ 'path-utils.c' ] ],
   ['path-special-cases'],
 ]
 

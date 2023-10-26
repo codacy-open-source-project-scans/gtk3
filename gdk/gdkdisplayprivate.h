@@ -25,6 +25,7 @@
 #include "gdksurfaceprivate.h"
 #include "gdkkeysprivate.h"
 #include "gdkdeviceprivate.h"
+#include "gdkdmabufprivate.h"
 
 #ifdef GDK_RENDERING_VULKAN
 #include <vulkan/vulkan.h>
@@ -113,6 +114,16 @@ struct _GdkDisplay
   guint have_egl_buffer_age : 1;
   guint have_egl_no_config_context : 1;
   guint have_egl_pixel_format_float : 1;
+  guint have_egl_dma_buf_import : 1;
+  guint have_egl_dma_buf_export : 1;
+
+  GdkDmabufFormats *dmabuf_formats;
+  const GdkDmabufDownloader *dmabuf_downloaders[4];
+
+   /* Cached data the EGL dmabuf downloader */
+  gpointer egl_gsk_renderer;
+  GdkDmabufFormats *egl_dmabuf_formats;
+  GdkDmabufFormats *egl_external_formats;
 };
 
 struct _GdkDisplayClass
@@ -206,6 +217,8 @@ void                _gdk_display_pointer_info_foreach (GdkDisplay       *display
 gulong              _gdk_display_get_next_serial      (GdkDisplay       *display);
 void                _gdk_display_pause_events         (GdkDisplay       *display);
 void                _gdk_display_unpause_events       (GdkDisplay       *display);
+
+void                gdk_display_init_dmabuf           (GdkDisplay       *self);
 
 GdkVulkanContext *  gdk_display_create_vulkan_context (GdkDisplay       *self,
                                                        GError          **error);

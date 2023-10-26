@@ -31,6 +31,9 @@
 #include "gdkclipboardprivate.h"
 #include "gdkdeviceprivate.h"
 #include "gdkdisplaymanagerprivate.h"
+#include "gdkdmabufformatsbuilderprivate.h"
+#include "gdkdmabufformatsprivate.h"
+#include "gdkdmabuftextureprivate.h"
 #include "gdkeventsprivate.h"
 #include "gdkframeclockidleprivate.h"
 #include "gdkglcontextprivate.h"
@@ -69,6 +72,7 @@ enum
   PROP_COMPOSITED,
   PROP_RGBA,
   PROP_INPUT_SHAPES,
+  PROP_DMABUF_FORMATS,
   LAST_PROP
 };
 
@@ -136,6 +140,10 @@ gdk_display_get_property (GObject    *object,
 
     case PROP_INPUT_SHAPES:
       g_value_set_boolean (value, gdk_display_supports_input_shapes (display));
+      break;
+
+    case PROP_DMABUF_FORMATS:
+      g_value_set_boxed (value, gdk_display_get_dmabuf_formats (display));
       break;
 
     default:
@@ -238,6 +246,11 @@ gdk_display_class_init (GdkDisplayClass *class)
     g_param_spec_boolean ("input-shapes", NULL, NULL,
                           TRUE,
                           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+
+  props[PROP_DMABUF_FORMATS] =
+    g_param_spec_boxed ("dmabuf-formats", NULL, NULL,
+                        GDK_TYPE_DMABUF_FORMATS,
+                        G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
   g_object_class_install_properties (object_class, LAST_PROP, props);
 
@@ -378,6 +391,10 @@ gdk_display_dispose (GObject *object)
 
   g_queue_clear (&display->queued_events);
 
+  g_clear_object (&display->egl_gsk_renderer);
+  g_clear_pointer (&display->egl_dmabuf_formats, gdk_dmabuf_formats_unref);
+  g_clear_pointer (&display->egl_external_formats, gdk_dmabuf_formats_unref);
+
   g_clear_object (&priv->gl_context);
 #ifdef HAVE_EGL
   g_clear_pointer (&priv->egl_display, eglTerminate);
@@ -403,6 +420,8 @@ gdk_display_finalize (GObject *object)
   g_hash_table_destroy (display->pointers_info);
 
   g_list_free_full (display->seats, g_object_unref);
+
+  g_clear_pointer (&display->dmabuf_formats, gdk_dmabuf_formats_unref);
 
   G_OBJECT_CLASS (gdk_display_parent_class)->finalize (object);
 }
@@ -1755,6 +1774,10 @@ gdk_display_init_egl (GdkDisplay  *self,
     epoxy_has_egl_extension (priv->egl_display, "EGL_KHR_no_config_context");
   self->have_egl_pixel_format_float =
     epoxy_has_egl_extension (priv->egl_display, "EGL_EXT_pixel_format_float");
+  self->have_egl_dma_buf_import =
+    epoxy_has_egl_extension (priv->egl_display, "EGL_EXT_image_dma_buf_import_modifiers");
+  self->have_egl_dma_buf_export =
+    epoxy_has_egl_extension (priv->egl_display, "EGL_MESA_image_dma_buf_export");
 
   if (self->have_egl_no_config_context)
     priv->egl_config_high_depth = gdk_display_create_egl_config (self,
@@ -1822,6 +1845,94 @@ gdk_display_get_egl_display (GdkDisplay *self)
 #else
   return NULL;
 #endif
+}
+
+#ifdef HAVE_DMABUF
+static void
+gdk_display_add_dmabuf_downloader (GdkDisplay                *display,
+                                   const GdkDmabufDownloader *downloader,
+                                   GdkDmabufFormatsBuilder   *builder)
+{
+  gsize i;
+
+  if (!downloader->add_formats (downloader, display, builder))
+    return;
+
+  /* dmabuf_downloaders is NULL-terminated */
+  for (i = 0; i < G_N_ELEMENTS (display->dmabuf_downloaders) - 1; i++)
+    {
+      if (display->dmabuf_downloaders[i] == NULL)
+        break;
+    }
+
+  g_assert (i < G_N_ELEMENTS (display->dmabuf_downloaders));
+
+  display->dmabuf_downloaders[i] = downloader;
+}
+#endif
+
+/* To support a drm format, we must be able to import it into GL
+ * using the relevant EGL extensions, and download it into a memory
+ * texture, possibly doing format conversion with shaders (in GSK).
+ */
+void
+gdk_display_init_dmabuf (GdkDisplay *self)
+{
+  GdkDmabufFormatsBuilder *builder;
+
+  if (self->dmabuf_formats != NULL)
+    return;
+
+  GDK_DISPLAY_DEBUG (self, DMABUF,
+                     "Beginning initialization of dmabuf support");
+
+  builder = gdk_dmabuf_formats_builder_new ();
+
+#ifdef HAVE_DMABUF
+  if (!GDK_DEBUG_CHECK (DMABUF_DISABLE))
+    {
+      gdk_display_prepare_gl (self, NULL);
+
+      gdk_display_add_dmabuf_downloader (self, gdk_dmabuf_get_direct_downloader (), builder);
+
+#ifdef HAVE_EGL
+      if (gdk_display_prepare_gl (self, NULL))
+        gdk_display_add_dmabuf_downloader (self, gdk_dmabuf_get_egl_downloader (), builder);
+#endif
+    }
+#endif
+
+  self->dmabuf_formats = gdk_dmabuf_formats_builder_free_to_formats (builder);
+
+  GDK_DISPLAY_DEBUG (self, DMABUF,
+                     "Initialized support for %zu dmabuf formats",
+                     gdk_dmabuf_formats_get_n_formats (self->dmabuf_formats));
+}
+
+/**
+ * gdk_display_get_dmabuf_formats:
+ * @display: a `GdkDisplay`
+ *
+ * Returns the dma-buf formats that are supported on this display.
+ *
+ * GTK may use OpenGL or Vulkan to support some formats.
+ * Calling this function will then initialize them if they aren't yet.
+ *
+ * The formats returned by this function can be used for negotiating
+ * buffer formats with producers such as v4l, pipewire or GStreamer.
+ *
+ * To learn more about dma-bufs, see [class@Gdk.DmabufTextureBuilder].
+ *
+ * Returns: (transfer none): a `GdkDmabufFormats` object
+ *
+ * Since: 4.14
+ */
+GdkDmabufFormats *
+gdk_display_get_dmabuf_formats (GdkDisplay *display)
+{
+  gdk_display_init_dmabuf (display);
+
+  return display->dmabuf_formats;
 }
 
 GdkDebugFlags

@@ -1,5 +1,5 @@
 project('gtk', 'c',
-        version: '4.13.1',
+        version: '4.13.3',
         default_options: [
           'buildtype=debugoptimized',
           'warning_level=1',
@@ -618,6 +618,20 @@ else
   vulkan_pkg_found = false
 endif
 
+if cc.has_header('linux/dma-buf.h')
+  dmabuf_dep = dependency('libdrm',
+    required: os_linux)
+else
+  if os_linux
+    error('OS is Linux, but linux/dma-buf.h not found.')
+  endif
+  dmabuf_dep = dependency('', required: false)
+endif
+cdata.set('HAVE_DMABUF', dmabuf_dep.found())
+# We only care about drm_fourcc.h for all the fourccs,
+# but not about linking to libdrm
+dmabuf_dep = dmabuf_dep.partial_dependency(includes: true, compile_args: true)
+
 cloudproviders_dep = dependency('cloudproviders',
   required: get_option('cloudproviders'),
   version: cloudproviders_req,
@@ -642,23 +656,9 @@ if not get_option('sysprof').disabled()
     ],
   )
   cdata.set('HAVE_SYSPROF', libsysprof_capture_dep.found())
-  libsysprof_dep = dependency('sysprof-4',
-    required: false,
-    default_options: [
-      'agent=false',
-      'examples=false',
-      'gtk=false',
-      'tests=false',
-      'tools=false',
-      'libsysprof=true',
-      'sysprofd=none',
-      'help=false',
-    ],
-  )
   profiler_enabled = true
 else
   libsysprof_capture_dep = disabler()
-  libsysprof_dep = disabler()
   profiler_enabled = false
 endif
 

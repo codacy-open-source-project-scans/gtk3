@@ -714,7 +714,9 @@ emit_text_changed (GtkAtSpiContext *self,
                                  "org.a11y.atspi.Event.Object",
                                  "TextChanged",
                                  g_variant_new ("(siiva{sv})",
-                                                kind, start, end, g_variant_new_string (text), NULL),
+                                                kind, start, end,
+                                                g_variant_new_string (text),
+                                                NULL),
                                  NULL);
 }
 

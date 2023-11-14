@@ -1563,7 +1563,6 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
                    epoxy_has_gl_extension ("GL_ARB_sync") ||
                    epoxy_has_gl_extension ("GL_APPLE_sync");
 
-#ifdef G_ENABLE_DEBUG
   {
     int max_texture_size;
     glGetIntegerv (GL_MAX_TEXTURE_SIZE, &max_texture_size);
@@ -1588,7 +1587,6 @@ gdk_gl_context_check_extensions (GdkGLContext *context)
                        priv->has_sync ? "yes" : "no",
                        priv->has_bgra ? "yes" : "no");
   }
-#endif
 
   priv->extensions_checked = TRUE;
 }
@@ -1983,12 +1981,12 @@ gdk_gl_backend_use (GdkGLBackend backend_type)
   g_assert (the_gl_backend_type == backend_type);
 }
 
-guint
-gdk_gl_context_import_dmabuf (GdkGLContext    *self,
-                              int              width,
-                              int              height,
-                              const GdkDmabuf *dmabuf,
-                              int              target)
+static guint
+gdk_gl_context_import_dmabuf_for_target (GdkGLContext    *self,
+                                         int              width,
+                                         int              height,
+                                         const GdkDmabuf *dmabuf,
+                                         int              target)
 {
 #if defined(HAVE_EGL) && defined(HAVE_DMABUF)
   GdkDisplay *display = gdk_gl_context_get_display (self);
@@ -2005,11 +2003,15 @@ gdk_gl_context_import_dmabuf (GdkGLContext    *self,
   g_return_val_if_fail (target == GL_TEXTURE_2D || target == GL_TEXTURE_EXTERNAL_OES, 0);
 
   if (egl_display == EGL_NO_DISPLAY || !display->have_egl_dma_buf_import)
-    return 0;
+    {
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Can't import dmabufs into GL, missing EGL or EGL_EXT_image_dma_buf_import_modifiers");
+      return 0;
+    }
 
-  GDK_DEBUG (DMABUF,
-             "Importing dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %u) into GL",
-             (char *) &dmabuf->fourcc, dmabuf->modifier, dmabuf->n_planes);
+  GDK_DISPLAY_DEBUG (display, DMABUF,
+                     "Importing dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %u) into GL",
+                     (char *) &dmabuf->fourcc, dmabuf->modifier, dmabuf->n_planes);
 
   i = 0;
   attribs[i++] = EGL_IMAGE_PRESERVED_KHR;
@@ -2020,6 +2022,10 @@ gdk_gl_context_import_dmabuf (GdkGLContext    *self,
   attribs[i++] = height;
   attribs[i++] = EGL_LINUX_DRM_FOURCC_EXT;
   attribs[i++] = dmabuf->fourcc;
+  attribs[i++] = EGL_YUV_COLOR_SPACE_HINT_EXT;
+  attribs[i++] = EGL_ITU_REC601_EXT;
+  attribs[i++] = EGL_SAMPLE_RANGE_HINT_EXT;
+  attribs[i++] = EGL_YUV_FULL_RANGE_EXT;
 
 #define ADD_PLANE(plane) \
   { \
@@ -2054,7 +2060,9 @@ gdk_gl_context_import_dmabuf (GdkGLContext    *self,
 
   if (image == EGL_NO_IMAGE)
     {
-      GDK_DEBUG (DMABUF, "Creating EGLImage for dmabuf failed: %#x", eglGetError ());
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Creating EGLImage for dmabuf failed: %#x",
+                         eglGetError ());
       return 0;
     }
 
@@ -2070,6 +2078,70 @@ gdk_gl_context_import_dmabuf (GdkGLContext    *self,
 #else
   return 0;
 #endif
+}
+
+guint
+gdk_gl_context_import_dmabuf (GdkGLContext    *self,
+                              int              width,
+                              int              height,
+                              const GdkDmabuf *dmabuf,
+                              gboolean        *external)
+{
+  GdkDisplay *display = gdk_gl_context_get_display (self);
+  guint texture_id;
+
+  gdk_display_init_dmabuf (display);
+
+  if (!gdk_dmabuf_formats_contains (display->egl_external_formats, dmabuf->fourcc, dmabuf->modifier))
+    {
+      texture_id = gdk_gl_context_import_dmabuf_for_target (self,
+                                                            width, height,
+                                                            dmabuf,
+                                                            GL_TEXTURE_2D);
+      if (texture_id == 0)
+        {
+          GDK_DISPLAY_DEBUG (display, DMABUF,
+                             "Import of %dx%d %.4s:%#" G_GINT64_MODIFIER "x dmabuf failed",
+                             width, height,
+                             (char *) &dmabuf->fourcc, dmabuf->modifier);
+          return 0;
+        }
+
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Imported %dx%d %.4s:%#" G_GINT64_MODIFIER "x dmabuf as GL_TEXTURE_2D texture",
+                         width, height,
+                         (char *) &dmabuf->fourcc, dmabuf->modifier);
+      *external = FALSE;
+      return texture_id;
+    }
+
+  if (!gdk_gl_context_get_use_es (self))
+    {
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Can't import external_only %.4s:%#" G_GINT64_MODIFIER "x outside of GLES",
+                         (char *) &dmabuf->fourcc, dmabuf->modifier);
+      return 0;
+    }
+
+  texture_id = gdk_gl_context_import_dmabuf_for_target (self,
+                                                        width, height,
+                                                        dmabuf,
+                                                        GL_TEXTURE_EXTERNAL_OES);
+  if (texture_id == 0)
+    {
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Import of external_only %dx%d %.4s:%#" G_GINT64_MODIFIER "x dmabuf failed",
+                         width, height,
+                         (char *) &dmabuf->fourcc, dmabuf->modifier);
+      return 0;
+    }
+
+  GDK_DISPLAY_DEBUG (display, DMABUF,
+                     "Imported %dx%d %.4s:%#" G_GINT64_MODIFIER "x dmabuf as GL_TEXTURE_EXTERNAL_OES texture",
+                     width, height,
+                     (char *) &dmabuf->fourcc, dmabuf->modifier);
+  *external = TRUE;
+  return texture_id;
 }
 
 gboolean
@@ -2098,9 +2170,13 @@ gdk_gl_context_export_dmabuf (GdkGLContext *self,
   g_return_val_if_fail (dmabuf != NULL, FALSE);
 
   if (egl_display == EGL_NO_DISPLAY || !display->have_egl_dma_buf_export)
-    return 0;
+    {
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Can't export dmabufs from GL, missing EGL or EGL_EXT_image_dma_buf_export");
+      return 0;
+    }
 
-  GDK_DEBUG (DMABUF, "Exporting GL texture to dmabuf");
+  GDK_DISPLAY_DEBUG (display, DMABUF, "Exporting GL texture to dmabuf");
 
   i = 0;
   attribs[i++] = EGL_IMAGE_PRESERVED_KHR;
@@ -2116,7 +2192,8 @@ gdk_gl_context_export_dmabuf (GdkGLContext *self,
 
   if (image == EGL_NO_IMAGE)
     {
-      GDK_DEBUG (DMABUF, "Creating EGLImage for dmabuf failed: %#x", eglGetError ());
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "Creating EGLImage for dmabuf failed: %#x", eglGetError ());
       return FALSE;
     }
 
@@ -2126,13 +2203,15 @@ gdk_gl_context_export_dmabuf (GdkGLContext *self,
                                       &n_planes,
                                       &modifier))
     {
-      GDK_DEBUG (DMABUF, "eglExportDMABUFImageQueryMESA failed: %#x", eglGetError ());
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "eglExportDMABUFImageQueryMESA failed: %#x", eglGetError ());
       goto out;
     }
 
   if (n_planes < 1 || n_planes > GDK_DMABUF_MAX_PLANES)
     {
-      GDK_DEBUG (DMABUF, "dmabufs with %d planes are not supported", n_planes);
+      GDK_DISPLAY_DEBUG (display, DMABUF,
+                         "dmabufs with %d planes are not supported", n_planes);
       goto out;
     }
 
@@ -2166,8 +2245,8 @@ gdk_gl_context_export_dmabuf (GdkGLContext *self,
       dmabuf->planes[i].offset = (int) offsets[i];
     }
 
-  GDK_DEBUG (DMABUF,
-             "Exported GL texture to dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %d)",
+  GDK_DISPLAY_DEBUG (display, DMABUF,
+                     "Exported GL texture to dmabuf (format: %.4s:%#" G_GINT64_MODIFIER "x, planes: %d)",
              (char *)&fourcc, modifier, n_planes);
 
   result = TRUE;

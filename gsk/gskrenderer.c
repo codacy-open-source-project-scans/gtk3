@@ -41,6 +41,7 @@
 #include "gl/gskglrenderer.h"
 #include "gskprofilerprivate.h"
 #include "gskrendernodeprivate.h"
+#include "gskoffloadprivate.h"
 
 #include "gskenumtypes.h"
 
@@ -128,7 +129,8 @@ gsk_renderer_real_render_texture (GskRenderer           *self,
 static void
 gsk_renderer_real_render (GskRenderer          *self,
                           GskRenderNode        *root,
-                          const cairo_region_t *region)
+                          const cairo_region_t *region,
+                          GskOffload           *offload)
 {
   GSK_RENDERER_WARN_NOT_IMPLEMENTED_METHOD (self, render);
 }
@@ -377,7 +379,6 @@ gsk_renderer_render_texture (GskRenderer           *renderer,
 
   texture = GSK_RENDERER_GET_CLASS (renderer)->render_texture (renderer, root, viewport);
 
-#ifdef G_ENABLE_DEBUG
   if (GSK_RENDERER_DEBUG_CHECK (renderer, RENDERER))
     {
       GString *buf = g_string_new ("*** Texture stats ***\n\n");
@@ -392,7 +393,6 @@ gsk_renderer_render_texture (GskRenderer           *renderer,
 
       g_string_free (buf, TRUE);
     }
-#endif
 
   g_clear_pointer (&priv->root_node, gsk_render_node_unref);
 
@@ -426,6 +426,7 @@ gsk_renderer_render (GskRenderer          *renderer,
 {
   GskRendererPrivate *priv = gsk_renderer_get_instance_private (renderer);
   cairo_region_t *clip;
+  GskOffload *offload = NULL;
 
   g_return_if_fail (GSK_IS_RENDERER (renderer));
   g_return_if_fail (priv->is_realized);
@@ -434,6 +435,11 @@ gsk_renderer_render (GskRenderer          *renderer,
 
   if (priv->surface == NULL)
     return;
+
+  priv->root_node = gsk_render_node_ref (root);
+
+  if (!GSK_RENDERER_DEBUG_CHECK (renderer, OFFLOAD_DISABLE))
+    offload = gsk_offload_new (priv->surface, root);
 
   if (region == NULL || priv->prev_node == NULL || GSK_RENDERER_DEBUG_CHECK (renderer, FULL_REDRAW))
     {
@@ -446,20 +452,12 @@ gsk_renderer_render (GskRenderer          *renderer,
   else
     {
       clip = cairo_region_copy (region);
-      gsk_render_node_diff (priv->prev_node, root, clip);
 
-      if (cairo_region_is_empty (clip))
-        {
-          cairo_region_destroy (clip);
-          return;
-        }
+      gsk_render_node_diff (priv->prev_node, root, clip, offload);
     }
 
-  priv->root_node = gsk_render_node_ref (root);
+  GSK_RENDERER_GET_CLASS (renderer)->render (renderer, root, clip, offload);
 
-  GSK_RENDERER_GET_CLASS (renderer)->render (renderer, root, clip);
-
-#ifdef G_ENABLE_DEBUG
   if (GSK_RENDERER_DEBUG_CHECK (renderer, RENDERER))
     {
       GString *buf = g_string_new ("*** Frame stats ***\n\n");
@@ -474,10 +472,10 @@ gsk_renderer_render (GskRenderer          *renderer,
 
       g_string_free (buf, TRUE);
     }
-#endif
 
   g_clear_pointer (&priv->prev_node, gsk_render_node_unref);
   cairo_region_destroy (clip);
+  gsk_offload_free (offload);
   priv->prev_node = priv->root_node;
   priv->root_node = NULL;
 }

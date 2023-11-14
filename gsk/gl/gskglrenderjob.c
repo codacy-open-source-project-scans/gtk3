@@ -31,9 +31,13 @@
 #include <gdk/gdktextureprivate.h>
 #include <gdk/gdkmemorytextureprivate.h>
 #include <gdk/gdkdmabuftexture.h>
+#include <gdk/gdksurfaceprivate.h>
+#include <gdk/gdksubsurfaceprivate.h>
 #include <gsk/gsktransformprivate.h>
 #include <gsk/gskroundedrectprivate.h>
 #include <gsk/gskrectprivate.h>
+#include <gsk/gskrendererprivate.h>
+#include <gsk/gskoffloadprivate.h>
 #include <math.h>
 #include <string.h>
 
@@ -44,10 +48,12 @@
 #include "gskglprogramprivate.h"
 #include "gskglrenderjobprivate.h"
 #include "gskglshadowlibraryprivate.h"
+#include "gskdebugprivate.h"
 
 #include "ninesliceprivate.h"
 #include "fp16private.h"
 
+#define ALLOW_OFFLOAD_FOR_ANY_TEXTURE 1
 
 #define ORTHO_NEAR_PLANE   -10000
 #define ORTHO_FAR_PLANE     10000
@@ -174,6 +180,8 @@ struct _GskGLRenderJob
    * looking at the format of the framebuffer we are rendering on.
    */
   int target_format;
+
+  GskOffload *offload;
 };
 
 typedef struct _GskGLRenderOffscreen
@@ -297,6 +305,7 @@ node_supports_2d_transform (const GskRenderNode *node)
     case GSK_MASK_NODE:
     case GSK_FILL_NODE:
     case GSK_STROKE_NODE:
+    case GSK_SUBSURFACE_NODE:
       return TRUE;
 
     case GSK_SHADOW_NODE:
@@ -353,6 +362,7 @@ node_supports_transform (const GskRenderNode *node)
     case GSK_MASK_NODE:
     case GSK_FILL_NODE:
     case GSK_STROKE_NODE:
+    case GSK_SUBSURFACE_NODE:
       return TRUE;
 
     case GSK_SHADOW_NODE:
@@ -1226,7 +1236,6 @@ gsk_gl_render_job_visit_as_fallback (GskGLRenderJob      *job,
   cairo_fill (cr);
   cairo_restore (cr);
 
-#ifdef G_ENABLE_DEBUG
   if (job->debug_fallback)
     {
       cairo_move_to (cr, 0, 0);
@@ -1242,7 +1251,6 @@ gsk_gl_render_job_visit_as_fallback (GskGLRenderJob      *job,
         cairo_set_source_rgba (cr, 1, 0, 0, 1);
       cairo_stroke (cr);
     }
-#endif
   cairo_destroy (cr);
 
   /* Create texture to upload */
@@ -2824,7 +2832,7 @@ equal_texture_nodes (const GskRenderNode *node1,
       gsk_texture_node_get_texture (node2))
     return FALSE;
 
-  return graphene_rect_equal (&node1->bounds, &node2->bounds);
+  return gsk_rect_equal (&node1->bounds, &node2->bounds);
 }
 
 static inline void
@@ -3951,7 +3959,7 @@ gsk_gl_render_job_visit_repeat_node (GskGLRenderJob      *job,
   if (node_is_invisible (child))
     return;
 
-  if (!graphene_rect_equal (child_bounds, &child->bounds))
+  if (!gsk_rect_equal (child_bounds, &child->bounds))
     {
       /* TODO: implement these repeat nodes. */
       gsk_gl_render_job_visit_as_fallback (job, node);
@@ -3995,6 +4003,36 @@ gsk_gl_render_job_visit_repeat_node (GskGLRenderJob      *job,
                                     offscreen.was_offscreen ? offscreen.area.y : offscreen.area.y2);
       gsk_gl_render_job_draw_offscreen (job, &node->bounds, &offscreen);
       gsk_gl_render_job_end_draw (job);
+    }
+}
+
+static inline void
+gsk_gl_render_job_visit_subsurface_node (GskGLRenderJob      *job,
+                                         const GskRenderNode *node)
+{
+  GdkSubsurface *subsurface;
+
+  subsurface = (GdkSubsurface *) gsk_subsurface_node_get_subsurface (node);
+
+  if (job->offload &&
+      gsk_offload_subsurface_is_offloaded (job->offload, subsurface))
+    {
+      /* Clear the area so we can see through */
+      if (gsk_gl_render_job_begin_draw (job, CHOOSE_PROGRAM (job, color)))
+        {
+          GskGLCommandBatch *batch;
+          guint16 color[4];
+          rgba_to_half (&(GdkRGBA){0,0,0,0}, color);
+
+          batch = gsk_gl_command_queue_get_batch (job->command_queue);
+          batch->draw.blend = 0;
+          gsk_gl_render_job_draw_rect_with_color (job, &node->bounds, color);
+          gsk_gl_render_job_end_draw (job);
+        }
+    }
+  else
+    {
+      gsk_gl_render_job_visit_node (job, gsk_subsurface_node_get_child (node));
     }
 }
 
@@ -4192,6 +4230,10 @@ gsk_gl_render_job_visit_node (GskGLRenderJob      *job,
 
     case GSK_STROKE_NODE:
       gsk_gl_render_job_visit_as_fallback (job, node);
+    break;
+
+    case GSK_SUBSURFACE_NODE:
+      gsk_gl_render_job_visit_subsurface_node (job, node);
     break;
 
     case GSK_NOT_A_RENDER_NODE:
@@ -4515,6 +4557,7 @@ gsk_gl_render_job_render (GskGLRenderJob *job,
     gsk_gl_command_queue_clear (job->command_queue, 0, &job->viewport);
   gsk_gl_render_job_visit_node (job, root);
   gdk_gl_context_pop_debug_group (job->command_queue->context);
+
   gdk_profiler_add_mark (start_time, GDK_PROFILER_CURRENT_TIME-start_time, "Build GL command queue", "");
 
 #if 0
@@ -4575,7 +4618,8 @@ gsk_gl_render_job_new (GskGLDriver           *driver,
                        float                  scale,
                        const cairo_region_t  *region,
                        guint                  framebuffer,
-                       gboolean               clear_framebuffer)
+                       gboolean               clear_framebuffer,
+                       GskOffload            *offload)
 {
   const graphene_rect_t *clip_rect = viewport;
   graphene_rect_t transformed_extents;
@@ -4611,6 +4655,7 @@ gsk_gl_render_job_new (GskGLDriver           *driver,
   job->scale_y = scale;
   job->viewport = *viewport;
   job->target_format = get_framebuffer_format (job->command_queue->context, framebuffer);
+  job->offload = offload;
 
   gsk_gl_render_job_set_alpha (job, 1.0f);
   gsk_gl_render_job_set_projection_from_rect (job, viewport, NULL);

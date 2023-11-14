@@ -609,6 +609,7 @@ gsk_gl_command_queue_begin_draw (GskGLCommandQueue   *self,
   batch->any.next_batch_index = -1;
   batch->any.viewport.width = width;
   batch->any.viewport.height = height;
+  batch->draw.blend = 1;
   batch->draw.framebuffer = 0;
   batch->draw.uniform_count = 0;
   batch->draw.uniform_offset = self->batch_uniforms.len;
@@ -685,6 +686,7 @@ gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
       last_batch->any.program == batch->any.program &&
       last_batch->any.viewport.width == batch->any.viewport.width &&
       last_batch->any.viewport.height == batch->any.viewport.height &&
+      last_batch->draw.blend == batch->draw.blend &&
       last_batch->draw.framebuffer == batch->draw.framebuffer &&
       last_batch->draw.vbo_offset + last_batch->draw.vbo_count == batch->draw.vbo_offset &&
       last_batch->draw.vbo_count + batch->draw.vbo_count <= 0xffff &&
@@ -1060,10 +1062,8 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
 
   gsk_gl_command_queue_make_current (self);
 
-#ifdef G_ENABLE_DEBUG
   gsk_gl_profiler_begin_gpu_region (self->gl_profiler);
   gsk_profiler_timer_begin (self->profiler, self->metrics.cpu_time);
-#endif
 
   glEnable (GL_DEPTH_TEST);
   glDepthFunc (GL_LEQUAL);
@@ -1106,7 +1106,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
                          (void *) G_STRUCT_OFFSET (GskGLDrawVertex, color2));
 
   /* Setup initial scissor clip */
-  if (scissor != NULL)
+  if (scissor != NULL && cairo_region_num_rectangles (scissor) > 0)
     {
       cairo_rectangle_int_t r;
 
@@ -1249,8 +1249,13 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
               n_uniforms += batch->draw.uniform_count;
             }
 
+          if (batch->draw.blend == 0)
+            glDisable (GL_BLEND);
+
           glDrawArrays (GL_TRIANGLES, batch->draw.vbo_offset, batch->draw.vbo_count);
 
+          if (batch->draw.blend == 0)
+            glEnable (GL_BLEND);
         break;
 
         default:
@@ -1289,7 +1294,6 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
   gdk_profiler_set_int_counter (self->metrics.n_uploads, self->n_uploads);
   gdk_profiler_set_int_counter (self->metrics.queue_depth, self->batches.len);
 
-#ifdef G_ENABLE_DEBUG
   {
     gint64 start_time G_GNUC_UNUSED = gsk_profiler_timer_get_start (self->profiler, self->metrics.cpu_time);
     gint64 cpu_time = gsk_profiler_timer_end (self->profiler, self->metrics.cpu_time);
@@ -1301,7 +1305,6 @@ gsk_gl_command_queue_execute (GskGLCommandQueue    *self,
 
     gsk_profiler_push_samples (self->profiler);
   }
-#endif
 }
 
 void
@@ -1716,7 +1719,6 @@ void
 gsk_gl_command_queue_set_profiler (GskGLCommandQueue *self,
                                    GskProfiler       *profiler)
 {
-#ifdef G_ENABLE_DEBUG
   g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
   g_assert (GSK_IS_PROFILER (profiler));
 
@@ -1735,5 +1737,4 @@ gsk_gl_command_queue_set_profiler (GskGLCommandQueue *self,
       self->metrics.n_programs = gdk_profiler_define_int_counter ("programs", "Number of program changes");
       self->metrics.queue_depth = gdk_profiler_define_int_counter ("gl-queue-depth", "Depth of GL command batches");
     }
-#endif
 }

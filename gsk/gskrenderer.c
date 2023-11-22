@@ -78,7 +78,6 @@ typedef struct
 
   GdkSurface *surface;
   GskRenderNode *prev_node;
-  GskRenderNode *root_node;
 
   GskProfiler *profiler;
 
@@ -129,8 +128,7 @@ gsk_renderer_real_render_texture (GskRenderer           *self,
 static void
 gsk_renderer_real_render (GskRenderer          *self,
                           GskRenderNode        *root,
-                          const cairo_region_t *region,
-                          GskOffload           *offload)
+                          const cairo_region_t *region)
 {
   GSK_RENDERER_WARN_NOT_IMPLEMENTED_METHOD (self, render);
 }
@@ -365,9 +363,6 @@ gsk_renderer_render_texture (GskRenderer           *renderer,
   g_return_val_if_fail (GSK_IS_RENDERER (renderer), NULL);
   g_return_val_if_fail (priv->is_realized, NULL);
   g_return_val_if_fail (GSK_IS_RENDER_NODE (root), NULL);
-  g_return_val_if_fail (priv->root_node == NULL, NULL);
-
-  priv->root_node = gsk_render_node_ref (root);
 
   if (viewport == NULL)
     {
@@ -393,8 +388,6 @@ gsk_renderer_render_texture (GskRenderer           *renderer,
 
       g_string_free (buf, TRUE);
     }
-
-  g_clear_pointer (&priv->root_node, gsk_render_node_unref);
 
   return texture;
 }
@@ -425,21 +418,24 @@ gsk_renderer_render (GskRenderer          *renderer,
                      const cairo_region_t *region)
 {
   GskRendererPrivate *priv = gsk_renderer_get_instance_private (renderer);
+  GskRendererClass *renderer_class;
   cairo_region_t *clip;
-  GskOffload *offload = NULL;
+  GskOffload *offload;
 
   g_return_if_fail (GSK_IS_RENDERER (renderer));
   g_return_if_fail (priv->is_realized);
   g_return_if_fail (GSK_IS_RENDER_NODE (root));
-  g_return_if_fail (priv->root_node == NULL);
 
   if (priv->surface == NULL)
     return;
 
-  priv->root_node = gsk_render_node_ref (root);
+  renderer_class = GSK_RENDERER_GET_CLASS (renderer);
 
-  if (!GSK_RENDERER_DEBUG_CHECK (renderer, OFFLOAD_DISABLE))
+  if (renderer_class->supports_offload &&
+      !GSK_RENDERER_DEBUG_CHECK (renderer, OFFLOAD_DISABLE))
     offload = gsk_offload_new (priv->surface, root);
+  else
+    offload = NULL;
 
   if (region == NULL || priv->prev_node == NULL || GSK_RENDERER_DEBUG_CHECK (renderer, FULL_REDRAW))
     {
@@ -456,7 +452,7 @@ gsk_renderer_render (GskRenderer          *renderer,
       gsk_render_node_diff (priv->prev_node, root, clip, offload);
     }
 
-  GSK_RENDERER_GET_CLASS (renderer)->render (renderer, root, clip, offload);
+  renderer_class->render (renderer, root, clip);
 
   if (GSK_RENDERER_DEBUG_CHECK (renderer, RENDERER))
     {
@@ -475,9 +471,8 @@ gsk_renderer_render (GskRenderer          *renderer,
 
   g_clear_pointer (&priv->prev_node, gsk_render_node_unref);
   cairo_region_destroy (clip);
-  gsk_offload_free (offload);
-  priv->prev_node = priv->root_node;
-  priv->root_node = NULL;
+  g_clear_pointer (&offload, gsk_offload_free);
+  priv->prev_node = gsk_render_node_ref (root);
 }
 
 /*< private >

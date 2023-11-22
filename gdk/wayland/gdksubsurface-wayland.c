@@ -87,8 +87,6 @@ params_buffer_failed (void                              *data,
 {
   CreateBufferData *cd = data;
 
-  g_warning ("Creating wl_buffer for dmabuf failed");
-
   cd->buffer = NULL;
   cd->done = TRUE;
 }
@@ -151,64 +149,173 @@ get_wl_buffer (GdkWaylandSubsurface *self,
   return buffer;
 }
 
-static inline gboolean
-texture_is_offloadable (GdkTexture *texture)
-{
-  GdkMemoryFormat format;
-
-  if (!GDK_IS_DMABUF_TEXTURE (texture))
-    return FALSE;
-
-  format = gdk_texture_get_format (texture);
-  return gdk_memory_format_alpha (format) == GDK_MEMORY_ALPHA_OPAQUE;
-}
-
 static gboolean
 gdk_wayland_subsurface_attach (GdkSubsurface         *sub,
                                GdkTexture            *texture,
-                               const graphene_rect_t *rect)
+                               const graphene_rect_t *rect,
+                               gboolean               above,
+                               GdkSubsurface         *sibling)
 {
   GdkWaylandSubsurface *self = GDK_WAYLAND_SUBSURFACE (sub);
-  gboolean result;
+  GdkWaylandSurface *parent = GDK_WAYLAND_SURFACE (sub->parent);
   struct wl_buffer *buffer = NULL;
+  gboolean result = FALSE;
+  GdkWaylandSubsurface *sib = sibling ? GDK_WAYLAND_SUBSURFACE (sibling) : NULL;
+  gboolean will_be_above;
+  double scale;
+  graphene_rect_t device_rect;
+  cairo_rectangle_int_t device_dest;
+
+  if (sib)
+    will_be_above = sib->above_parent;
+  else
+    will_be_above = above;
 
   if (sub->parent == NULL)
     {
-      g_warning ("Can't draw to destroyed subsurface %p", self);
+      g_warning ("Can't attach to destroyed subsurface %p", self);
       return FALSE;
     }
 
-  self->dest.x = floorf (rect->origin.x);
-  self->dest.y = floorf (rect->origin.y);
-  self->dest.width = ceilf (rect->origin.x + rect->size.width) - self->dest.x;
-  self->dest.height = ceilf (rect->origin.y + rect->size.height) - self->dest.y;
+  self->dest.x = rect->origin.x;
+  self->dest.y = rect->origin.y;
+  self->dest.width = rect->size.width;
+  self->dest.height = rect->size.height;
 
-  wl_subsurface_set_position (self->subsurface, self->dest.x, self->dest.y);
-  wp_viewport_set_destination (self->viewport, self->dest.width, self->dest.height);
+  scale = gdk_fractional_scale_to_double (&parent->scale);
+  device_rect.origin.x = rect->origin.x * scale;
+  device_rect.origin.y = rect->origin.y * scale;
+  device_rect.size.width = rect->size.width * scale;
+  device_rect.size.height = rect->size.height * scale;
+  device_dest.x = device_rect.origin.x;
+  device_dest.y = device_rect.origin.y;
+  device_dest.width = device_rect.size.width;
+  device_dest.height = device_rect.size.height;
 
-  if (texture_is_offloadable (texture))
-    buffer = get_wl_buffer (self, texture);
-
-  if (buffer)
+  if (self->dest.x != rect->origin.x ||
+      self->dest.y != rect->origin.y ||
+      self->dest.width != rect->size.width ||
+      self->dest.height != rect->size.height)
     {
-      g_set_object (&self->texture, texture);
+      GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                         "Non-integer coordinates %g %g %g %g for %dx%d texture, hiding subsurface %p",
+                         rect->origin.x, rect->origin.y,
+                         rect->size.width, rect->size.height,
+                         gdk_texture_get_width (texture),
+                         gdk_texture_get_height (texture),
+                         self);
+    }
+  else if (device_dest.x != device_rect.origin.x ||
+           device_dest.y != device_rect.origin.y ||
+           device_dest.width != device_rect.size.width ||
+           device_dest.height != device_rect.size.height)
+    {
+      GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                         "Non-integral device coordinates %g %g %g %g (fractional scale %.2f), hiding subsurface %p",
+                         device_rect.origin.x, device_rect.origin.y,
+                         device_rect.size.width, device_rect.size.width,
+                         scale,
+                         self);
+    }
+  else if (!GDK_IS_DMABUF_TEXTURE (texture))
+    {
+      GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                         "%dx%d %s is not a GdkDmabufTexture, hiding subsurface %p",
+                         gdk_texture_get_width (texture),
+                         gdk_texture_get_height (texture),
+                         G_OBJECT_TYPE_NAME (texture),
+                         self);
+    }
+  else if (!will_be_above &&
+           gdk_memory_format_alpha (gdk_texture_get_format (texture)) != GDK_MEMORY_ALPHA_OPAQUE)
+    {
+      GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                         "Cannot offload non-opaque %dx%d texture below, hiding subsurface %p",
+                         gdk_texture_get_width (texture),
+                         gdk_texture_get_height (texture),
+                         self);
+    }
+  else
+    {
+      if (g_set_object (&self->texture, texture))
+        {
+          buffer = get_wl_buffer (self, texture);
+          if (buffer != NULL)
+            {
+              GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                                 "Attached %dx%d texture to subsurface %p at %d %d %d %d",
+                                 gdk_texture_get_width (texture),
+                                 gdk_texture_get_height (texture),
+                                 self,
+                                 self->dest.x, self->dest.y,
+                                 self->dest.width, self->dest.height);
+              result = TRUE;
+            }
+          else
+            {
+              GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                                 "Compositor failed to create wl_buffer for %dx%d texture, hiding subsurface %p",
+                                 gdk_texture_get_width (texture),
+                                 gdk_texture_get_height (texture),
+                                 self);
+            }
+        }
+      else
+        {
+          buffer = NULL;
+          GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
+                             "Moved %dx%d texture in subsurface %p to %d %d %d %d",
+                             gdk_texture_get_width (texture),
+                             gdk_texture_get_height (texture),
+                             self,
+                             self->dest.x, self->dest.y,
+                             self->dest.width, self->dest.height);
+          result = TRUE;
+        }
+    }
 
-      wl_surface_attach (self->surface, buffer, 0, 0);
-      wl_surface_damage_buffer (self->surface,
-                                0, 0,
-                                gdk_texture_get_width (texture),
-                                gdk_texture_get_height (texture));
+  if (result)
+    {
+      wl_subsurface_set_position (self->subsurface, self->dest.x, self->dest.y);
+      wp_viewport_set_destination (self->viewport, self->dest.width, self->dest.height);
+
+      if (buffer)
+        {
+          wl_surface_attach (self->surface, buffer, 0, 0);
+          wl_surface_damage_buffer (self->surface,
+                                    0, 0,
+                                    gdk_texture_get_width (texture),
+                                    gdk_texture_get_height (texture));
+
+        }
+
       result = TRUE;
     }
   else
     {
-      GDK_DISPLAY_DEBUG (gdk_surface_get_display (sub->parent), OFFLOAD,
-                         "Failed to get buffer for texture, hiding subsurface %p", self);
-
       g_set_object (&self->texture, NULL);
 
       wl_surface_attach (self->surface, NULL, 0, 0);
-      result = FALSE;
+    }
+
+  if (sib)
+    {
+      if (above)
+        wl_subsurface_place_above (self->subsurface, sib->surface);
+      else
+        wl_subsurface_place_below (self->subsurface, sib->surface);
+
+      self->above_parent = sib->above_parent;
+    }
+  else
+    {
+      if (above)
+        wl_subsurface_place_above (self->subsurface,
+                                   GDK_WAYLAND_SURFACE (sub->parent)->display_server.wl_surface);
+      else
+        wl_subsurface_place_below (self->subsurface,
+                                   GDK_WAYLAND_SURFACE (sub->parent)->display_server.wl_surface);
+      self->above_parent = above;
     }
 
   wl_surface_commit (self->surface);
@@ -258,62 +365,6 @@ gdk_wayland_subsurface_get_rect (GdkSubsurface   *sub,
   rect->size.height = self->dest.height;
 }
 
-static void
-gdk_wayland_subsurface_place_above (GdkSubsurface *sub,
-                                    GdkSubsurface *sibling)
-{
-  GdkWaylandSubsurface *self = GDK_WAYLAND_SUBSURFACE (sub);
-  GdkWaylandSubsurface *sib = sibling ? GDK_WAYLAND_SUBSURFACE (sibling) : NULL;
-  gboolean above_parent;
-
-  g_return_if_fail (sibling == NULL || sub->parent == sibling->parent);
-
-  if (sib)
-    {
-      wl_subsurface_place_above (self->subsurface, sib->surface);
-      above_parent = sib->above_parent;
-    }
-  else
-    {
-      wl_subsurface_place_above (self->subsurface,
-                                 GDK_WAYLAND_SURFACE (sub->parent)->display_server.wl_surface);
-      above_parent = TRUE;
-    }
-
-  if (self->above_parent != above_parent)
-    self->above_parent = above_parent;
-
-  ((GdkWaylandSurface *)sub->parent)->has_pending_subsurface_commits = TRUE;
-}
-
-static void
-gdk_wayland_subsurface_place_below (GdkSubsurface *sub,
-                                    GdkSubsurface *sibling)
-{
-  GdkWaylandSubsurface *self = GDK_WAYLAND_SUBSURFACE (sub);
-  GdkWaylandSubsurface *sib = sibling ? GDK_WAYLAND_SUBSURFACE (sibling) : NULL;
-  gboolean above_parent;
-
-  g_return_if_fail (sibling == NULL || sub->parent == sibling->parent);
-
-  if (sib)
-    {
-      wl_subsurface_place_below (self->subsurface, sib->surface);
-      above_parent = sib->above_parent;
-    }
-  else
-    {
-      wl_subsurface_place_below (self->subsurface,
-                                 GDK_WAYLAND_SURFACE (sub->parent)->display_server.wl_surface);
-      above_parent = FALSE;
-    }
-
-  if (self->above_parent != above_parent)
-    self->above_parent = above_parent;
-
-  ((GdkWaylandSurface *)sub->parent)->has_pending_subsurface_commits = TRUE;
-}
-
 static gboolean
 gdk_wayland_subsurface_is_above_parent (GdkSubsurface *sub)
 {
@@ -334,8 +385,6 @@ gdk_wayland_subsurface_class_init (GdkWaylandSubsurfaceClass *class)
   subsurface_class->detach = gdk_wayland_subsurface_detach;
   subsurface_class->get_texture = gdk_wayland_subsurface_get_texture;
   subsurface_class->get_rect = gdk_wayland_subsurface_get_rect;
-  subsurface_class->place_above = gdk_wayland_subsurface_place_above;
-  subsurface_class->place_below = gdk_wayland_subsurface_place_below;
   subsurface_class->is_above_parent = gdk_wayland_subsurface_is_above_parent;
 };
 
@@ -374,3 +423,46 @@ gdk_wayland_subsurface_clear_frame_callback (GdkSubsurface *sub)
 
   g_clear_pointer (&self->frame_callback, wl_callback_destroy);
 }
+
+GdkSubsurface *
+gdk_wayland_surface_create_subsurface (GdkSurface *surface)
+{
+  GdkWaylandSurface *impl = GDK_WAYLAND_SURFACE (surface);
+  GdkDisplay *display = gdk_surface_get_display (surface);
+  GdkWaylandDisplay *disp = GDK_WAYLAND_DISPLAY (display);
+  GdkWaylandSubsurface *sub;
+  struct wl_region *region;
+
+  if (disp->viewporter == NULL)
+    {
+      GDK_DISPLAY_DEBUG (display, OFFLOAD, "Can't use subsurfaces without viewporter");
+      return NULL;
+    }
+
+  sub = g_object_new (GDK_TYPE_WAYLAND_SUBSURFACE, NULL);
+
+  sub->surface = wl_compositor_create_surface (disp->compositor);
+  sub->subsurface = wl_subcompositor_get_subsurface (disp->subcompositor,
+                                                     sub->surface,
+                                                     impl->display_server.wl_surface);
+  sub->viewport = wp_viewporter_get_viewport (disp->viewporter, sub->surface);
+
+  /* No input, please */
+  region = wl_compositor_create_region (disp->compositor);
+  wl_surface_set_input_region (sub->surface, region);
+  wl_region_destroy (region);
+
+  /* Keep a max-sized opaque region so we don't have to update it
+   * when the size of the texture changes.
+   */
+  sub->opaque_region = wl_compositor_create_region (disp->compositor);
+  wl_region_add (sub->opaque_region, 0, 0, G_MAXINT, G_MAXINT);
+  wl_surface_set_opaque_region (sub->surface, sub->opaque_region);
+
+  sub->above_parent = TRUE;
+
+  GDK_DISPLAY_DEBUG (display, OFFLOAD, "Subsurface %p of surface %p created", sub, impl);
+
+  return GDK_SUBSURFACE (sub);
+}
+

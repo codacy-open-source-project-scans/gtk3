@@ -211,9 +211,6 @@ are only available when GTK has been configured with `-Ddebug=true`.
 
 A number of options affect behavior instead of logging:
 
-`nograbs`
-: Turn off all pointer and keyboard grabs
-
 `portals`
 : Force the use of [portals](https://docs.flatpak.org/en/latest/portals.html)
 
@@ -229,11 +226,14 @@ A number of options affect behavior instead of logging:
 `gl-debug`
 : Insert debugging information in OpenGL
 
-`gl-legacy`
-: Use a legacy OpenGL context
+`gl-disable-gl`
+: Don't allow the use of OpenGL GL API. This forces GLES to be used
 
-`gl-gles`
-: Use a GLES OpenGL context
+`gl-disable-gles`
+: Don't allow the use of OpenGL GLES API. This forces GL to be used
+
+`gl-prefer-gl`
+: Prefer OpenGL over OpenGL ES. This was the default behavior before GTK 4.14.
 
 `gl-egl`
 : Use an EGL context on X11 or Windows

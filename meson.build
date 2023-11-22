@@ -1,5 +1,5 @@
 project('gtk', 'c',
-        version: '4.13.3',
+        version: '4.13.4',
         default_options: [
           'buildtype=debugoptimized',
           'warning_level=1',
@@ -175,8 +175,8 @@ check_headers = [
   'sys/systeminfo.h',
   'sys/time.h',
   'sys/types.h',
+  'sys/sysmacros.h',
   'unistd.h',
-  'gio/gdesktopappinfo.h'
 ]
 
 foreach h : check_headers

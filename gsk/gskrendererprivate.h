@@ -38,6 +38,8 @@ struct _GskRendererClass
 {
   GObjectClass parent_class;
 
+  gboolean supports_offload;
+
   gboolean             (* realize)                              (GskRenderer            *renderer,
                                                                  GdkSurface             *surface,
                                                                  GError                **error);
@@ -48,8 +50,7 @@ struct _GskRendererClass
                                                                  const graphene_rect_t  *viewport);
   void                 (* render)                               (GskRenderer            *renderer,
                                                                  GskRenderNode          *root,
-                                                                 const cairo_region_t   *invalid,
-                                                                 GskOffload             *offload);
+                                                                 const cairo_region_t   *invalid);
 };
 
 GskProfiler *           gsk_renderer_get_profiler               (GskRenderer    *renderer);

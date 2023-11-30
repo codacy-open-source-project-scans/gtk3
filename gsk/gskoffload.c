@@ -174,7 +174,7 @@ push_rect_clip (GskOffload           *self,
   Clip *clip = g_new0 (Clip, 1);
   clip->rect = *rect;
   clip->is_rectilinear = gsk_rounded_rect_is_rectilinear (rect);
-  clip->is_empty = rect->bounds.size.width == 0 && rect->bounds.size.height == 0;
+  clip->is_empty = (rect->bounds.size.width == 0 || rect->bounds.size.height == 0);
 
   self->clips = g_slist_prepend (self->clips, clip);
   self->current_clip = self->clips->data;
@@ -318,7 +318,7 @@ update_clip (GskOffload            *self,
 
       /* The clip gets simpler for this node */
 
-      graphene_rect_intersection (&self->current_clip->rect.bounds, &transformed_bounds, &rect);
+      gsk_rect_intersection (&self->current_clip->rect.bounds, &transformed_bounds, &rect);
       push_rect_clip (self, &GSK_ROUNDED_RECT_INIT_FROM_RECT (rect));
       return TRUE;
     }
@@ -416,9 +416,9 @@ visit_node (GskOffload    *self,
         if (self->current_clip->is_rectilinear)
           {
             memset (&intersection.corner, 0, sizeof intersection.corner);
-            graphene_rect_intersection (&transformed_clip,
-                                        &self->current_clip->rect.bounds,
-                                        &intersection.bounds);
+            gsk_rect_intersection (&transformed_clip,
+                                   &self->current_clip->rect.bounds,
+                                   &intersection.bounds);
 
             push_rect_clip (self, &intersection);
             visit_node (self, gsk_clip_node_get_child (node));

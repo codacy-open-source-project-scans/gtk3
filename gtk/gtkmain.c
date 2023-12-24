@@ -1198,8 +1198,8 @@ gtk_synthesize_crossing_events (GtkRoot         *toplevel,
     {
       widget = gtk_widget_stack_get (&target_array, i);
 
-      if (i < gtk_widget_stack_get_size (&target_array) - 1)
-        crossing.new_descendent = gtk_widget_stack_get (&target_array, i + 1);
+      if (i > 0)
+        crossing.new_descendent = gtk_widget_stack_get (&target_array, i - 1);
       else
         crossing.new_descendent = NULL;
 
@@ -1219,9 +1219,10 @@ gtk_synthesize_crossing_events (GtkRoot         *toplevel,
         }
       else
         {
-          crossing.old_descendent = old_target ? crossing.new_descendent : NULL;
+          crossing.old_descendent = (old_target && ancestor) ? crossing.new_descendent : NULL;
         }
 
+      check_crossing_invariants (widget, &crossing);
       translate_coordinates (surface_x, surface_y, &x, &y, widget);
       gtk_widget_handle_crossing (widget, &crossing, x, y);
       if (crossing_type == GTK_CROSSING_POINTER)

@@ -84,9 +84,11 @@ void            gsk_render_node_diff_impossible         (GskRenderNode          
 void            gsk_container_node_diff_with            (GskRenderNode               *container,
                                                          GskRenderNode               *other,
                                                          GskDiffData                 *data);
+void            gsk_render_node_draw_fallback           (GskRenderNode               *node,
+                                                         cairo_t                     *cr);
 
-bool            gsk_border_node_get_uniform             (const GskRenderNode         *self);
-bool            gsk_border_node_get_uniform_color       (const GskRenderNode         *self);
+bool            gsk_border_node_get_uniform             (const GskRenderNode         *self) G_GNUC_PURE;
+bool            gsk_border_node_get_uniform_color       (const GskRenderNode         *self) G_GNUC_PURE;
 
 void            gsk_text_node_serialize_glyphs          (GskRenderNode               *self,
                                                          GString                     *str);
@@ -97,11 +99,11 @@ GskRenderNode ** gsk_container_node_get_children        (const GskRenderNode    
 void            gsk_transform_node_get_translate        (const GskRenderNode         *node,
                                                          float                       *dx,
                                                          float                       *dy);
-GdkMemoryDepth  gsk_render_node_get_preferred_depth     (const GskRenderNode         *node);
+GdkMemoryDepth  gsk_render_node_get_preferred_depth     (const GskRenderNode         *node) G_GNUC_PURE;
 
-gboolean        gsk_container_node_is_disjoint          (const GskRenderNode         *node);
+gboolean        gsk_container_node_is_disjoint          (const GskRenderNode         *node) G_GNUC_PURE;
 
-gboolean        gsk_render_node_use_offscreen_for_opacity (const GskRenderNode       *node);
+gboolean        gsk_render_node_use_offscreen_for_opacity (const GskRenderNode       *node) G_GNUC_PURE;
 
 #define gsk_render_node_ref(node)   _gsk_render_node_ref(node)
 #define gsk_render_node_unref(node) _gsk_render_node_unref(node)

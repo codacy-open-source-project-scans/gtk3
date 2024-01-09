@@ -83,9 +83,15 @@ struct _GtkInspectorGeneral
   GtkWidget *version_box;
   GtkWidget *env_box;
   GtkWidget *display_box;
+  GtkWidget *display_extensions_row;
+  GtkWidget *display_extensions_box;
   GtkWidget *monitor_box;
   GtkWidget *gl_box;
+  GtkWidget *gl_extensions_row;
+  GtkWidget *gl_extensions_box;
   GtkWidget *vulkan_box;
+  GtkWidget *vulkan_extensions_row;
+  GtkWidget *vulkan_extensions_box;
   GtkWidget *device_box;
   GtkWidget *gtk_version;
   GtkWidget *gdk_backend;
@@ -124,7 +130,6 @@ struct _GtkInspectorGeneral
   GtkWidget *display_name;
   GtkWidget *display_rgba;
   GtkWidget *display_composited;
-  GtkSizeGroup *labels;
 
   GdkDisplay *display;
 };
@@ -179,6 +184,8 @@ init_version (GtkInspectorGeneral *gen)
     renderer = "GL";
   else if (strcmp (G_OBJECT_TYPE_NAME (gsk_renderer), "GskCairoRenderer") == 0)
     renderer = "Cairo";
+  else if (strcmp (G_OBJECT_TYPE_NAME (gsk_renderer), "GskNglRenderer") == 0)
+    renderer = "GL (new)";
   else
     renderer = "Unknown";
 
@@ -240,8 +247,6 @@ add_check_row (GtkInspectorGeneral *gen,
 
   gtk_widget_set_hexpand (box, FALSE);
   gtk_list_box_insert (list, row, -1);
-
-  gtk_size_group_add_widget (gen->labels, label);
 }
 
 static void
@@ -280,8 +285,6 @@ add_label_row (GtkInspectorGeneral *gen,
 
   gtk_widget_set_hexpand (box, FALSE);
   gtk_list_box_insert (GTK_LIST_BOX (list), row, -1);
-
-  gtk_size_group_add_widget (gen->labels, label);
 }
 
 #ifdef GDK_WINDOWING_X11
@@ -290,7 +293,7 @@ append_glx_extension_row (GtkInspectorGeneral *gen,
                           Display             *dpy,
                           const char          *ext)
 {
-  add_check_row (gen, GTK_LIST_BOX (gen->gl_box), ext, epoxy_has_glx_extension (dpy, 0, ext), 0);
+  add_check_row (gen, GTK_LIST_BOX (gen->gl_extensions_box), ext, epoxy_has_glx_extension (dpy, 0, ext), 0);
 }
 #endif
 
@@ -301,7 +304,7 @@ append_wgl_extension_row (GtkInspectorGeneral *gen,
 {
   HDC hdc = 0;
 
-  add_check_row (gen, GTK_LIST_BOX (gen->gl_box), ext, epoxy_has_wgl_extension (hdc, ext), 0);
+  add_check_row (gen, GTK_LIST_BOX (gen->gl_extensions_box), ext, epoxy_has_wgl_extension (hdc, ext), 0);
 }
 #endif
 
@@ -311,7 +314,7 @@ append_egl_extension_row (GtkInspectorGeneral *gen,
                           EGLDisplay          dpy,
                           const char          *ext)
 {
-  add_check_row (gen, GTK_LIST_BOX (gen->gl_box), ext, epoxy_has_egl_extension (dpy, ext), 0);
+  add_check_row (gen, GTK_LIST_BOX (gen->gl_extensions_box), ext, epoxy_has_egl_extension (dpy, ext), 0);
 }
 
 static EGLDisplay
@@ -354,6 +357,7 @@ init_gl (GtkInspectorGeneral *gen)
       gtk_widget_set_visible (gen->gl_vendor_row, FALSE);
       gtk_widget_set_visible (gen->gl_full_version_row, FALSE);
       gtk_widget_set_visible (gen->glsl_version_row, FALSE);
+      gtk_widget_set_visible (gen->gl_extensions_row, FALSE);
       gtk_label_set_text (GTK_LABEL (gen->gl_error), error->message);
       g_error_free (error);
       return;
@@ -443,7 +447,7 @@ init_gl (GtkInspectorGeneral *gen)
 
 #ifdef GDK_RENDERING_VULKAN
 static gboolean
-has_debug_extension (GdkVulkanContext *context)
+has_debug_extension (void)
 {
   uint32_t i;
   uint32_t n_extensions;
@@ -461,7 +465,7 @@ has_debug_extension (GdkVulkanContext *context)
 }
 
 static gboolean
-has_validation_layer (GdkVulkanContext *context)
+has_validation_layer (void)
 {
   uint32_t i;
   uint32_t n_layers;
@@ -483,9 +487,6 @@ static void
 init_vulkan (GtkInspectorGeneral *gen)
 {
 #ifdef GDK_RENDERING_VULKAN
-  GdkSurface *surface;
-  GdkVulkanContext *context;
-
   if (gdk_display_get_debug_flags (gen->display) & GDK_DEBUG_VULKAN_DISABLE)
     {
       gtk_label_set_text (GTK_LABEL (gen->vk_device), C_("Vulkan device", "Disabled"));
@@ -494,11 +495,7 @@ init_vulkan (GtkInspectorGeneral *gen)
       return;
     }
 
-  surface = gdk_surface_new_toplevel (gen->display);
-  context = gdk_surface_create_vulkan_context (surface, NULL);
-  gdk_surface_destroy (surface);
-
-  if (context)
+  if (gen->display->vk_device)
     {
       VkPhysicalDevice vk_device;
       VkPhysicalDeviceProperties props;
@@ -506,7 +503,7 @@ init_vulkan (GtkInspectorGeneral *gen)
       char *api_version;
       char *driver_version;
 
-      vk_device = gdk_vulkan_context_get_physical_device (context);
+      vk_device = gen->display->vk_physical_device;
       vkGetPhysicalDeviceProperties (vk_device, &props);
 
       device_name = g_strdup_printf ("%s (%d)", props.deviceName, props.deviceType);
@@ -527,21 +524,19 @@ init_vulkan (GtkInspectorGeneral *gen)
       g_free (api_version);
       g_free (driver_version);
 
-      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_box), VK_KHR_SURFACE_EXTENSION_NAME, TRUE, 0);
+      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_extensions_box), VK_KHR_SURFACE_EXTENSION_NAME, TRUE, 0);
 #ifdef GDK_WINDOWING_X11
       if (GDK_IS_X11_DISPLAY (gen->display))
-        add_check_row (gen, GTK_LIST_BOX (gen->vulkan_box), "VK_KHR_xlib_surface", TRUE, 0);
+        add_check_row (gen, GTK_LIST_BOX (gen->vulkan_extensions_box), "VK_KHR_xlib_surface", TRUE, 0);
 #endif
 #ifdef GDK_WINDOWING_WAYLAND
       if (GDK_IS_WAYLAND_DISPLAY (gen->display))
-        add_check_row (gen, GTK_LIST_BOX (gen->vulkan_box), "VK_KHR_wayland_surface", TRUE, 0);
+        add_check_row (gen, GTK_LIST_BOX (gen->vulkan_extensions_box), "VK_KHR_wayland_surface", TRUE, 0);
 #endif
-      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_box), VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
-                     has_debug_extension (context), 0);
-      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_box), "VK_LAYER_KHRONOS_validation",
-                     has_validation_layer (context), 0);
-
-      g_object_unref (context);
+      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_extensions_box), VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+                     has_debug_extension (), 0);
+      add_check_row (gen, GTK_LIST_BOX (gen->vulkan_extensions_box), "VK_LAYER_KHRONOS_validation",
+                     has_validation_layer (), 0);
     }
   else
 #endif
@@ -625,7 +620,7 @@ append_wayland_protocol_row (GtkInspectorGeneral *gen,
   if (proxy == NULL)
     return;
 
-  list = GTK_LIST_BOX (gen->display_box);
+  list = GTK_LIST_BOX (gen->display_extensions_box);
 
   id = wl_proxy_get_class (proxy);
   version = wl_proxy_get_version (proxy);
@@ -675,7 +670,6 @@ populate_display (GdkDisplay *display, GtkInspectorGeneral *gen)
   GtkWidget *child;
   GtkListBox *list;
 
-  gtk_widget_set_visible (gen->display_composited, TRUE);
   list = GTK_LIST_BOX (gen->display_box);
   children = NULL;
   for (child = gtk_widget_get_first_child (GTK_WIDGET (list));
@@ -690,7 +684,8 @@ populate_display (GdkDisplay *display, GtkInspectorGeneral *gen)
       child = l->data;
       if (gtk_widget_is_ancestor (gen->display_name, child) ||
           gtk_widget_is_ancestor (gen->display_rgba, child) ||
-          gtk_widget_is_ancestor (gen->display_composited, child))
+          gtk_widget_is_ancestor (gen->display_composited, child) ||
+          child == gen->display_extensions_row)
         continue;
 
       gtk_list_box_remove (list, child);
@@ -704,9 +699,16 @@ populate_display (GdkDisplay *display, GtkInspectorGeneral *gen)
   gtk_widget_set_visible (gen->display_composited,
                           gdk_display_is_composited (display));
 
+  list = GTK_LIST_BOX (gen->display_extensions_box);
+  while ((child = gtk_widget_get_first_child (GTK_WIDGET (list))) != NULL)
+    gtk_list_box_remove (list, child);
+
 #ifdef GDK_WINDOWING_WAYLAND
   add_wayland_protocols (display, gen);
 #endif
+
+  gtk_widget_set_visible (gen->display_extensions_row,
+                          gtk_widget_get_first_child (gen->display_extensions_box) != NULL);
 }
 
 static void
@@ -1125,16 +1127,16 @@ keynav_failed (GtkWidget *widget, GtkDirectionType direction, GtkInspectorGenera
   else if (direction == GTK_DIR_DOWN && widget == gen->display_box)
     next = gen->monitor_box;
   else if (direction == GTK_DIR_DOWN && widget == gen->monitor_box)
+    next = gen->device_box;
+  else if (direction == GTK_DIR_DOWN && widget == gen->device_box)
     next = gen->gl_box;
   else if (direction == GTK_DIR_DOWN && widget == gen->gl_box)
-    next = gen->vulkan_box;
-  else if (direction == GTK_DIR_DOWN && widget == gen->vulkan_box)
-    next = gen->device_box;
-  else if (direction == GTK_DIR_UP && widget == gen->device_box)
     next = gen->vulkan_box;
   else if (direction == GTK_DIR_UP && widget == gen->vulkan_box)
     next = gen->gl_box;
   else if (direction == GTK_DIR_UP && widget == gen->gl_box)
+    next = gen->device_box;
+  else if (direction == GTK_DIR_UP && widget == gen->device_box)
     next = gen->monitor_box;
   else if (direction == GTK_DIR_UP && widget == gen->monitor_box)
     next = gen->display_box;
@@ -1206,9 +1208,15 @@ gtk_inspector_general_class_init (GtkInspectorGeneralClass *klass)
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, version_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, env_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_box);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_extensions_row);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_extensions_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, monitor_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gl_box);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gl_extensions_row);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gl_extensions_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, vulkan_box);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, vulkan_extensions_row);
+  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, vulkan_extensions_box);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gtk_version);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gdk_backend);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gsk_renderer);
@@ -1243,7 +1251,6 @@ gtk_inspector_general_class_init (GtkInspectorGeneralClass *klass)
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gtk_exe_prefix);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gtk_data_prefix);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, gsettings_schema_dir);
-  gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, labels);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_name);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_composited);
   gtk_widget_class_bind_template_child (widget_class, GtkInspectorGeneral, display_rgba);

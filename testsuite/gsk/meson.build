@@ -25,6 +25,7 @@ compare_render_tests = [
   'blur-huge-contents-outside-of-clip-nogl',
   'border-bottom-right',
   'border-one-rounded',
+  'border-opacity',
   'borders-rotated',
   'borders-scaled',
   'clip-coordinates-2d',
@@ -32,6 +33,7 @@ compare_render_tests = [
   'clip-in-rounded-clip1',
   'clip-in-rounded-clip2',
   'clip-in-rounded-clip3',
+  'clip-intersection-fail-opacity-nogl',
   'clipped-repeat',
   'clipped_rounded_clip',
   'clip-nested1',
@@ -40,6 +42,7 @@ compare_render_tests = [
   'color-matrix-identity',
   'color-matrix-merge',
   'color-matrix-parsing',
+  'conic-gradient-with-64-colorstops',
   'crossfade-clip-both-children',
   'cross-fade-clipped-with-huge-children-nogl',
   'cross-fade-in-opacity',
@@ -66,7 +69,9 @@ compare_render_tests = [
   'empty-texture',
   'empty-transform',
   'fill',
+  'fill-clipped-nogl',
   'fill-opacity',
+  'fill-scaled-up',
   'fill-with-3d-contents-nogl-nocairo',
   'huge-height',
   'huge-width',
@@ -82,7 +87,9 @@ compare_render_tests = [
   'mask-modes-in-opacity',
   'mask-modes-with-alpha',
   'mask-texture-color-alpha',
+  'mipmap-generation-later',
   'nested-rounded-clips',
+  'offscreen-pixel-alignment-nogl-nocairo',
   'opacity_clip',
   'opacity-colormatrix-combinations',
   'opacity-overdraw',
@@ -119,6 +126,7 @@ compare_render_tests = [
   'shadow-opacity',
   'shrink-rounded-border',
   'stroke',
+  'stroke-clipped-nogl',
   'stroke-opacity',
   'stroke-with-3d-contents-nogl-nocairo',
   'texture-coords',
@@ -149,6 +157,8 @@ renderers = [
   { 'name': 'gl' },
   { 'name': 'broadway' },
   { 'name': 'cairo' },
+  { 'name': 'ngl' },
+  { 'name': 'vulkan' },
 ]
 
 compare_xfails = [
@@ -178,10 +188,6 @@ foreach renderer : renderers
       'gsk-compare-' + renderer_name,
     ]
 
-    if compare_xfails.contains(testname)
-      suites += 'failing'
-    endif
-
     if compare_xfails_small_texture.contains(testname)
       suites += 'wayland_gles2_failing'
     endif
@@ -194,7 +200,8 @@ foreach renderer : renderers
     ]
 
     if ((not testname.contains(exclude_term)) and
-        (renderer_name != 'broadway' or broadway_enabled))
+        (renderer_name != 'broadway' or broadway_enabled) and
+        (renderer_name != 'vulkan' or have_vulkan))
       test(renderer_name + ' ' + testname, compare_render,
         args: [
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -420,7 +427,7 @@ if os_linux
 
   foreach test : offload_tests
     if test.endswith('.node') and not test.endswith('.out')
-      test('parser ' + test, offload,
+      test('offload ' + test, offload,
         args: [
           join_paths(meson.current_source_dir(), 'offload', test)
         ],
@@ -438,10 +445,11 @@ if os_linux
 endif
 
 tests = [
-  ['transform'],
-  ['shader'],
-  ['path', [ 'path-utils.c' ] ],
-  ['path-special-cases'],
+  [ 'transform' ],
+  [ 'shader' ],
+  [ 'path', [ 'path-utils.c' ] ],
+  [ 'path-special-cases' ],
+  [ 'scaling' ],
 ]
 
 test_cargs = []

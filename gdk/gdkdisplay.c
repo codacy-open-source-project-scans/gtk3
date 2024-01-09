@@ -40,7 +40,7 @@
 #include "gdkglcontextprivate.h"
 #include "gdkmonitorprivate.h"
 #include "gdkrectangle.h"
-#include "gdkvulkancontext.h"
+#include "gdkvulkancontextprivate.h"
 
 #ifdef HAVE_EGL
 #include <epoxy/egl.h>
@@ -253,6 +253,13 @@ gdk_display_class_init (GdkDisplayClass *class)
                           TRUE,
                           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
+  /**
+   * GdkDisplay:dmabuf-formats:
+   *
+   * The dma-buf formats that are supported on this display
+   *
+   * Since: 4.14
+   */
   props[PROP_DMABUF_FORMATS] =
     g_param_spec_boxed ("dmabuf-formats", NULL, NULL,
                         GDK_TYPE_DMABUF_FORMATS,
@@ -409,6 +416,13 @@ gdk_display_dispose (GObject *object)
 
   g_clear_pointer (&display->egl_dmabuf_formats, gdk_dmabuf_formats_unref);
   g_clear_pointer (&display->egl_external_formats, gdk_dmabuf_formats_unref);
+#ifdef GDK_RENDERING_VULKAN
+  if (display->vk_dmabuf_formats)
+    {
+      gdk_display_unref_vulkan (display);
+      g_assert (display->vk_dmabuf_formats == NULL);
+    }
+#endif
 
   g_clear_object (&priv->gl_context);
 #ifdef HAVE_EGL
@@ -1182,9 +1196,9 @@ _gdk_display_get_next_serial (GdkDisplay *display)
  * Indicates to the GUI environment that the application has
  * finished loading, using a given identifier.
  *
- * GTK will call this function automatically for [class@Gtk.Window]
+ * GTK will call this function automatically for [GtkWindow](../gtk4/class.Window.html)
  * with custom startup-notification identifier unless
- * [method@Gtk.Window.set_auto_startup_notification]
+ * [gtk_window_set_auto_startup_notification()](../gtk4/method.Window.set_auto_startup_notification.html)
  * is called to disable that feature.
  *
  * Deprecated: 4.10: Using [method@Gdk.Toplevel.set_startup_id] is sufficient
@@ -1253,12 +1267,14 @@ gdk_display_get_keymap (GdkDisplay *display)
 /*<private>
  * gdk_display_create_vulkan_context:
  * @self: a `GdkDisplay`
+ * @surface: (nullable): the `GdkSurface` to use or %NULL for a surfaceless
+ *   context
  * @error: return location for an error
  *
  * Creates a new `GdkVulkanContext` for use with @display.
  *
- * The context can not be used to draw to surfaces, it can only be
- * used for custom rendering or compute.
+ * If @surface is NULL, the context can not be used to draw to surfaces,
+ * it can only be used for custom rendering or compute.
  *
  * If the creation of the `GdkVulkanContext` failed, @error will be set.
  *
@@ -1267,9 +1283,11 @@ gdk_display_get_keymap (GdkDisplay *display)
  */
 GdkVulkanContext *
 gdk_display_create_vulkan_context (GdkDisplay  *self,
+                                   GdkSurface  *surface,
                                    GError     **error)
 {
   g_return_val_if_fail (GDK_IS_DISPLAY (self), NULL);
+  g_return_val_if_fail (surface == NULL || GDK_IS_SURFACE (surface), NULL);
   g_return_val_if_fail (error == NULL || *error == NULL, NULL);
 
   if (gdk_display_get_debug_flags (self) & GDK_DEBUG_VULKAN_DISABLE)
@@ -1286,11 +1304,33 @@ gdk_display_create_vulkan_context (GdkDisplay  *self,
       return FALSE;
     }
 
-  return g_initable_new (GDK_DISPLAY_GET_CLASS (self)->vk_context_type,
-                         NULL,
-                         error,
-                         "display", self,
-                         NULL);
+  if (surface)
+    {
+      return g_initable_new (GDK_DISPLAY_GET_CLASS (self)->vk_context_type,
+                             NULL,
+                             error,
+                             "surface", surface,
+                             NULL);
+    }
+  else
+    {
+      return g_initable_new (GDK_DISPLAY_GET_CLASS (self)->vk_context_type,
+                             NULL,
+                             error,
+                             "display", self,
+                             NULL);
+    }
+}
+
+gboolean
+gdk_display_has_vulkan_feature (GdkDisplay        *self,
+                                GdkVulkanFeatures  feature)
+{
+#ifdef GDK_RENDERING_VULKAN
+  return !!(self->vulkan_features & feature);
+#else
+  return FALSE;
+#endif
 }
 
 static void
@@ -1932,6 +1972,10 @@ gdk_display_init_dmabuf (GdkDisplay *self)
 #ifdef HAVE_DMABUF
   if (!GDK_DISPLAY_DEBUG_CHECK (self, DMABUF_DISABLE))
     {
+#ifdef GDK_RENDERING_VULKAN
+      gdk_display_add_dmabuf_downloader (self, gdk_vulkan_get_dmabuf_downloader (self, builder));
+#endif
+
 #ifdef HAVE_EGL
       gdk_display_add_dmabuf_downloader (self, gdk_dmabuf_get_egl_downloader (self, builder));
 #endif

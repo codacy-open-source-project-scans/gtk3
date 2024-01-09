@@ -71,7 +71,7 @@ gdk_draw_context_default_surface_resized (GdkDrawContext *context)
 static void
 gdk_draw_context_default_empty_frame (GdkDrawContext *context)
 {
-  g_warning ("FIXME: Implement");
+  g_warning ("FIXME: Implement GdkDrawContext.empty_frame in %s", G_OBJECT_TYPE_NAME (context));
 }
 
 static void
@@ -305,8 +305,8 @@ gdk_draw_context_get_surface (GdkDrawContext *context)
  *
  * When using GTK, the widget system automatically places calls to
  * gdk_draw_context_begin_frame() and gdk_draw_context_end_frame() via the
- * use of [class@Gsk.Renderer]s, so application code does not need to call
- * these functions explicitly.
+ * use of [GskRenderer](../gsk4/class.Renderer.html)s, so application code
+ * does not need to call these functions explicitly.
  */
 void
 gdk_draw_context_begin_frame (GdkDrawContext       *context,
@@ -331,7 +331,7 @@ gdk_draw_context_begin_frame (GdkDrawContext       *context,
  *
  * This is only a request and if the GDK backend does not support HDR rendering
  * or does not consider it worthwhile, it may choose to not honor the request.
- * It may also choose to provide a differnet depth even if it was not requested.
+ * It may also choose to provide a different depth even if it was not requested.
  * Typically the steps undertaken by a backend are:
  * 1. Check if high depth is supported by this drawing backend.
  * 2. Check if the compositor supports high depth.

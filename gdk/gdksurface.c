@@ -57,7 +57,7 @@
  * A `GdkSurface` is a rectangular region on the screen.
  *
  * It’s a low-level object, used to implement high-level objects
- * such as [class@Gtk.Window] or [class@Gtk.Dialog] in GTK.
+ * such as [GtkWindow](../gtk4/class.Window.html).
  *
  * The surfaces you see in practice are either [iface@Gdk.Toplevel] or
  * [iface@Gdk.Popup], and those interfaces provide much of the required
@@ -1246,43 +1246,20 @@ gdk_surface_create_cairo_context (GdkSurface *surface)
  * @surface: a `GdkSurface`
  * @error: return location for an error
  *
- * Creates a new `GdkVulkanContext` for rendering on @surface.
+ * Sets an error and returns %NULL.
  *
- * If the creation of the `GdkVulkanContext` failed, @error will be set.
+ * Returns: (transfer full): %NULL
  *
- * Returns: (transfer full): the newly created `GdkVulkanContext`, or
- *   %NULL on error
+ * Deprecated: 4.14: GTK does not expose any Vulkan internals. This
+ *   function is a leftover that was accidentally exposed.
  */
 GdkVulkanContext *
 gdk_surface_create_vulkan_context (GdkSurface  *surface,
                                    GError    **error)
 {
-  GdkDisplay *display;
-
-  g_return_val_if_fail (GDK_IS_SURFACE (surface), NULL);
-  g_return_val_if_fail (error == NULL || *error == NULL, NULL);
-
-  if (gdk_display_get_debug_flags (surface->display) & GDK_DEBUG_VULKAN_DISABLE)
-    {
-      g_set_error_literal (error, GDK_VULKAN_ERROR, GDK_VULKAN_ERROR_NOT_AVAILABLE,
-                           _("Vulkan support disabled via GDK_DEBUG"));
-      return NULL;
-    }
-
-  display = surface->display;
-
-  if (GDK_DISPLAY_GET_CLASS (display)->vk_extension_name == NULL)
-    {
-      g_set_error (error, GDK_VULKAN_ERROR, GDK_VULKAN_ERROR_UNSUPPORTED,
-                   "The %s backend has no Vulkan support.", G_OBJECT_TYPE_NAME (display));
-      return FALSE;
-    }
-
-  return g_initable_new (GDK_DISPLAY_GET_CLASS (display)->vk_context_type,
-                         NULL,
-                         error,
-                         "surface", surface,
-                         NULL);
+  g_set_error (error, GDK_VULKAN_ERROR, GDK_VULKAN_ERROR_UNSUPPORTED,
+               "GTK does not expose Vulkan internals.");
+  return FALSE;
 }
 
 static gboolean
@@ -1716,7 +1693,7 @@ gdk_surface_get_device_position (GdkSurface       *surface,
  * For toplevel surfaces, withdraws them, so they will no longer be
  * known to the window manager; for all surfaces, unmaps them, so
  * they won’t be displayed. Normally done automatically as
- * part of [method@Gtk.Widget.hide].
+ * part of [gtk_widget_hide()](../gtk4/method.Widget.hide.html).
  */
 void
 gdk_surface_hide (GdkSurface *surface)
@@ -2636,7 +2613,7 @@ gdk_surface_get_scale (GdkSurface *surface)
  * GTK will update this property automatically if the @surface background
  * is opaque, as we know where the opaque regions are. If your surface
  * background is not opaque, please update this property in your
- * [vfunc@Gtk.Widget.css_changed] handler.
+ * [GtkWidgetClass.css_changed](../gtk4/vfunc.Widget.css_changed.html) handler.
  */
 void
 gdk_surface_set_opaque_region (GdkSurface      *surface,

@@ -10,6 +10,7 @@ node_parser = executable('node-parser', 'node-parser.c',
 )
 
 compare_render_tests = [
+  'big-box-glyph-nocairo',
   'big-checkerboard',
   'big-checkerboard-scaled-down',
   'big-checkerboard-scaled-down-nearest',
@@ -28,6 +29,7 @@ compare_render_tests = [
   'border-opacity',
   'borders-rotated',
   'borders-scaled',
+  'clip-contained',
   'clip-coordinates-2d',
   'clip-coordinates-nocairo',
   'clip-in-rounded-clip1',
@@ -70,6 +72,8 @@ compare_render_tests = [
   'empty-transform',
   'fill',
   'fill-clipped-nogl',
+  'fill-fractional-translate-gradient-nogl',
+  'fill-fractional-translate-nogl',
   'fill-opacity',
   'fill-scaled-up',
   'fill-with-3d-contents-nogl-nocairo',
@@ -89,6 +93,7 @@ compare_render_tests = [
   'mask-texture-color-alpha',
   'mipmap-generation-later',
   'nested-rounded-clips',
+  'offscreen-fractional-translate-nogl',
   'offscreen-pixel-alignment-nogl-nocairo',
   'opacity_clip',
   'opacity-colormatrix-combinations',
@@ -127,8 +132,13 @@ compare_render_tests = [
   'shrink-rounded-border',
   'stroke',
   'stroke-clipped-nogl',
+  'stroke-fractional-translate-gradient-nogl',
+  'stroke-fractional-translate-nogl',
   'stroke-opacity',
   'stroke-with-3d-contents-nogl-nocairo',
+  'text-glyph-lsb',
+  'text-mixed-color-nocairo',
+  'text-mixed-color-colrv1',
   'texture-coords',
   'texture-scale-filters-nocairo',
   'texture-scale-magnify-10000x',
@@ -196,13 +206,14 @@ foreach renderer : renderers
       'GSK_RENDERER=' + renderer_name,
       'GTK_A11Y=test',
       'G_TEST_SRCDIR=@0@'.format(meson.current_source_dir()),
-      'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir())
+      'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir()),
+      'TEST_FONT_DIR=@0@/fonts'.format(meson.current_source_dir())
     ]
 
     if ((not testname.contains(exclude_term)) and
         (renderer_name != 'broadway' or broadway_enabled) and
         (renderer_name != 'vulkan' or have_vulkan))
-      test(renderer_name + ' ' + testname, compare_render,
+      test('compare ' + renderer_name + ' ' + testname, compare_render,
         args: [
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
           join_paths(meson.current_source_dir(), 'compare', testname + '.node'),
@@ -211,7 +222,7 @@ foreach renderer : renderers
         env: test_env,
         suite: suites,
       )
-      test(renderer_name + ' ' + testname + ' flipped', compare_render,
+      test('compare ' + renderer_name + ' ' + testname + ' flipped', compare_render,
         args: [
           '--flip',
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -221,7 +232,7 @@ foreach renderer : renderers
         env: test_env,
         suite: suites + [ 'gsk-compare-flipped-' + renderer_name ],
       )
-      test(renderer_name + ' ' + testname + ' repeated', compare_render,
+      test('compare ' + renderer_name + ' ' + testname + ' repeated', compare_render,
         args: [
           '--repeat',
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -231,7 +242,7 @@ foreach renderer : renderers
         env: test_env,
         suite: suites + [ 'gsk-compare-repeated-' + renderer_name ],
       )
-      test(renderer_name + ' ' + testname + ' rotated', compare_render,
+      test('compare ' + renderer_name + ' ' + testname + ' rotated', compare_render,
         args: [
           '--rotate',
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -241,7 +252,7 @@ foreach renderer : renderers
         env: test_env,
         suite: suites + [ 'gsk-compare-rotated-' + renderer_name ],
       )
-      test(renderer_name + ' ' + testname + ' masked', compare_render,
+      test('compare ' + renderer_name + ' ' + testname + ' masked', compare_render,
         args: [
           '--mask',
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -251,7 +262,7 @@ foreach renderer : renderers
         env: test_env,
         suite: suites + [ 'gsk-compare-masked-' + renderer_name ],
       )
-      test(renderer_name + ' ' + testname + ' replayed', compare_render,
+      test('compare ' + renderer_name + ' ' + testname + ' replayed', compare_render,
         args: [
           '--replay',
           '--output', join_paths(meson.current_build_dir(), 'compare', renderer_name),
@@ -374,10 +385,15 @@ node_parser_tests = [
   'text-fail.node',
   'text-fail.ref.node',
   'text-fail.errors',
+  'text-font-blob.node',
+  'text-font-blob.ref.node',
+  'text-font-errors.node',
+  'text-font-errors.ref.node',
+  'text-font-errors.errors',
   'text-no-color.node',
   'texture-fail.node',
   'texture-fail.ref.node',
-  'texture-fail.ref.errors',
+  'texture-fail.errors',
   'texture-names.node',
   'texture-scale-filters.node',
   'texture-scale-filters.ref.node',

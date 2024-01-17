@@ -1,8 +1,10 @@
+#include "config.h"
 #include <string.h>
 #include <glib/gstdio.h>
 #include <gtk/gtk.h>
 #include <stdlib.h>
 #include "../reftests/reftest-compare.h"
+
 
 static char *arg_output_dir = NULL;
 static gboolean flip = FALSE;

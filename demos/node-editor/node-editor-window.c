@@ -28,6 +28,8 @@
 #include "gsk/broadway/gskbroadwayrenderer.h"
 #endif
 
+#include <glib/gstdio.h>
+
 #include <cairo.h>
 #ifdef CAIRO_HAS_SVG_SURFACE
 #include <cairo-svg.h>
@@ -55,6 +57,7 @@ struct _NodeEditorWindow
   GtkWidget *testcase_name_entry;
   GtkWidget *testcase_save_button;
   GtkWidget *scale_scale;
+  GtkWidget *crash_warning;
 
   GtkWidget *renderer_listbox;
   GListStore *renderers;
@@ -64,12 +67,22 @@ struct _NodeEditorWindow
   GFileMonitor *file_monitor;
 
   GArray *errors;
+
+  guint update_timeout;
+  gboolean auto_reload;
 };
 
 struct _NodeEditorWindowClass
 {
   GtkApplicationWindowClass parent_class;
 };
+
+enum {
+  PROP_AUTO_RELOAD = 1,
+  NUM_PROPERTIES
+};
+
+static GParamSpec *properties[NUM_PROPERTIES] = { NULL, };
 
 G_DEFINE_TYPE(NodeEditorWindow, node_editor_window, GTK_TYPE_APPLICATION_WINDOW);
 
@@ -163,19 +176,84 @@ text_iter_skip_whitespace_backward (GtkTextIter *iter)
 }
 
 static void
-text_changed (GtkTextBuffer    *buffer,
-              NodeEditorWindow *self)
+highlight_text (NodeEditorWindow *self)
+{
+  GtkTextIter iter;
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_start_iter (self->text_buffer, &iter);
+
+  while (!gtk_text_iter_is_end (&iter))
+    {
+      gunichar c = gtk_text_iter_get_char (&iter);
+
+      if (c == '{')
+        {
+          GtkTextIter word_end = iter;
+          GtkTextIter word_start;
+
+          gtk_text_iter_backward_char (&word_end);
+          text_iter_skip_whitespace_backward (&word_end);
+
+          word_start = word_end;
+          gtk_text_iter_backward_word_start (&word_start);
+          text_iter_skip_alpha_backward (&word_start);
+
+          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "nodename", &word_start, &word_end);
+        }
+      else if (c == ':')
+        {
+          GtkTextIter word_end = iter;
+          GtkTextIter word_start;
+
+          gtk_text_iter_backward_char (&word_end);
+          text_iter_skip_whitespace_backward (&word_end);
+
+          word_start = word_end;
+          gtk_text_iter_backward_word_start (&word_start);
+          text_iter_skip_alpha_backward (&word_start);
+
+          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "propname", &word_start, &word_end);
+        }
+      else if (c == '"')
+        {
+          GtkTextIter string_start = iter;
+          GtkTextIter string_end = iter;
+
+          gtk_text_iter_forward_char (&iter);
+          while (!gtk_text_iter_is_end (&iter))
+            {
+              c = gtk_text_iter_get_char (&iter);
+
+              if (c == '"')
+                {
+                  gtk_text_iter_forward_char (&iter);
+                  string_end = iter;
+                  break;
+                }
+
+              gtk_text_iter_forward_char (&iter);
+            }
+
+          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "string", &string_start, &string_end);
+        }
+
+      gtk_text_iter_forward_char (&iter);
+    }
+
+  gtk_text_buffer_get_bounds (self->text_buffer, &start, &end);
+  gtk_text_buffer_apply_tag_by_name (self->text_buffer, "no-hyphens", &start, &end);
+}
+
+static void
+reload (NodeEditorWindow *self)
 {
   char *text;
   GBytes *bytes;
-  GtkTextIter iter;
-  GtkTextIter start, end;
   float scale;
   GskRenderNode *big_node;
 
-  g_array_remove_range (self->errors, 0, self->errors->len);
   text = get_current_text (self->text_buffer);
-  text_buffer_remove_all_tags (self->text_buffer);
   bytes = g_bytes_new_take (text, strlen (text));
 
   g_clear_pointer (&self->node, gsk_render_node_unref);
@@ -236,73 +314,19 @@ text_changed (GtkTextBuffer    *buffer,
     }
 
   g_clear_pointer (&big_node, gsk_render_node_unref);
+}
 
-  gtk_text_buffer_get_start_iter (self->text_buffer, &iter);
+static void
+text_changed (GtkTextBuffer    *buffer,
+              NodeEditorWindow *self)
+{
+  g_array_remove_range (self->errors, 0, self->errors->len);
+  text_buffer_remove_all_tags (self->text_buffer);
 
-  while (!gtk_text_iter_is_end (&iter))
-    {
-      gunichar c = gtk_text_iter_get_char (&iter);
+  if (self->auto_reload)
+    reload (self);
 
-      if (c == '{')
-        {
-          GtkTextIter word_end = iter;
-          GtkTextIter word_start;
-
-          gtk_text_iter_backward_char (&word_end);
-          text_iter_skip_whitespace_backward (&word_end);
-
-          word_start = word_end;
-          gtk_text_iter_backward_word_start (&word_start);
-          text_iter_skip_alpha_backward (&word_start);
-
-          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "nodename",
-                                             &word_start, &word_end);
-        }
-      else if (c == ':')
-        {
-          GtkTextIter word_end = iter;
-          GtkTextIter word_start;
-
-          gtk_text_iter_backward_char (&word_end);
-          text_iter_skip_whitespace_backward (&word_end);
-
-          word_start = word_end;
-          gtk_text_iter_backward_word_start (&word_start);
-          text_iter_skip_alpha_backward (&word_start);
-
-          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "propname",
-                                             &word_start, &word_end);
-        }
-      else if (c == '"')
-        {
-          GtkTextIter string_start = iter;
-          GtkTextIter string_end = iter;
-
-          gtk_text_iter_forward_char (&iter);
-          while (!gtk_text_iter_is_end (&iter))
-            {
-              c = gtk_text_iter_get_char (&iter);
-
-              if (c == '"')
-                {
-                  gtk_text_iter_forward_char (&iter);
-                  string_end = iter;
-                  break;
-                }
-
-              gtk_text_iter_forward_char (&iter);
-            }
-
-          gtk_text_buffer_apply_tag_by_name (self->text_buffer, "string",
-                                             &string_start, &string_end);
-        }
-
-      gtk_text_iter_forward_char (&iter);
-    }
-
-  gtk_text_buffer_get_bounds (self->text_buffer, &start, &end);
-  gtk_text_buffer_apply_tag_by_name (self->text_buffer, "no-hyphens",
-                                     &start, &end);
+  highlight_text (self);
 }
 
 static void
@@ -1101,6 +1125,9 @@ node_editor_window_finalize (GObject *object)
 {
   NodeEditorWindow *self = (NodeEditorWindow *)object;
 
+  if (self->update_timeout)
+    g_source_remove (self->update_timeout);
+
   g_array_free (self->errors, TRUE);
 
   g_clear_pointer (&self->node, gsk_render_node_unref);
@@ -1541,6 +1568,79 @@ edit_action_cb (GtkWidget  *widget,
 }
 
 static void
+node_editor_window_map (GtkWidget *widget)
+{
+  char *path;
+
+  GTK_WIDGET_CLASS (node_editor_window_parent_class)->map (widget);
+
+  path = get_autosave_path (NULL);
+  if (g_file_test (path, G_FILE_TEST_EXISTS))
+    {
+      g_free (path);
+      return;
+    }
+
+  g_free (path);
+}
+
+static void
+node_editor_window_set_property (GObject      *object,
+                                 guint         prop_id,
+                                 const GValue *value,
+                                 GParamSpec   *pspec)
+{
+  NodeEditorWindow *self = NODE_EDITOR_WINDOW (object);
+
+  switch (prop_id)
+    {
+    case PROP_AUTO_RELOAD:
+      {
+        gboolean auto_reload = g_value_get_boolean (value);
+        if (self->auto_reload != auto_reload)
+          {
+            self->auto_reload = auto_reload;
+
+            if (self->auto_reload)
+              reload (self);
+          }
+      }
+      break;
+
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
+node_editor_window_get_property (GObject    *object,
+                                 guint       prop_id,
+                                 GValue     *value,
+                                 GParamSpec *pspec)
+{
+  NodeEditorWindow *self = NODE_EDITOR_WINDOW (object);
+
+  switch (prop_id)
+    {
+    case PROP_AUTO_RELOAD:
+      g_value_set_boolean (value, self->auto_reload);
+      break;
+
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+    }
+}
+
+static void
+close_crash_warning (GtkButton        *button,
+                     NodeEditorWindow *self)
+{
+  gtk_revealer_set_reveal_child (GTK_REVEALER (self->crash_warning), FALSE);
+}
+
+static void
 node_editor_window_class_init (NodeEditorWindowClass *class)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (class);
@@ -1551,12 +1651,22 @@ node_editor_window_class_init (NodeEditorWindowClass *class)
 
   object_class->dispose = node_editor_window_dispose;
   object_class->finalize = node_editor_window_finalize;
+  object_class->set_property = node_editor_window_set_property;
+  object_class->get_property = node_editor_window_get_property;
 
   gtk_widget_class_set_template_from_resource (widget_class,
                                                "/org/gtk/gtk4/node-editor/node-editor-window.ui");
 
   widget_class->realize = node_editor_window_realize;
   widget_class->unrealize = node_editor_window_unrealize;
+
+  widget_class->map = node_editor_window_map;
+
+  properties[PROP_AUTO_RELOAD] = g_param_spec_boolean ("auto-reload", NULL, NULL,
+                                                       TRUE,
+                                                       G_PARAM_READABLE | G_PARAM_WRITABLE | G_PARAM_STATIC_NAME);
+
+  g_object_class_install_properties (object_class, NUM_PROPERTIES, properties);
 
   gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, text_view);
   gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, picture);
@@ -1567,6 +1677,7 @@ node_editor_window_class_init (NodeEditorWindowClass *class)
   gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, testcase_name_entry);
   gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, testcase_save_button);
   gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, scale_scale);
+  gtk_widget_class_bind_template_child (widget_class, NodeEditorWindow, crash_warning);
 
   gtk_widget_class_bind_template_callback (widget_class, text_view_query_tooltip_cb);
   gtk_widget_class_bind_template_callback (widget_class, open_cb);
@@ -1579,6 +1690,7 @@ node_editor_window_class_init (NodeEditorWindowClass *class)
   gtk_widget_class_bind_template_callback (widget_class, on_picture_drag_prepare_cb);
   gtk_widget_class_bind_template_callback (widget_class, on_picture_drop_cb);
   gtk_widget_class_bind_template_callback (widget_class, click_gesture_pressed);
+  gtk_widget_class_bind_template_callback (widget_class, close_crash_warning);
 
   gtk_widget_class_install_action (widget_class, "smart-edit", NULL, edit_action_cb);
 
@@ -1630,10 +1742,132 @@ static GActionEntry win_entries[] = {
   { "open", window_open, NULL, NULL, NULL },
 };
 
+char *
+get_autosave_path (const char *suffix)
+{
+  char *path;
+  char *name;
+
+  name = g_strconcat ("autosave", suffix, NULL);
+  path = g_build_filename (g_get_user_cache_dir (), "gtk4-node-editor", name, NULL);
+  g_free (name);
+
+  return path;
+}
+
+static void
+set_initial_text (NodeEditorWindow *self)
+{
+  char *path, *path1;
+  char *initial_text;
+  gsize len;
+
+  path = get_autosave_path (NULL);
+  path1 = get_autosave_path ("-unsafe");
+
+  if (g_file_get_contents (path, &initial_text, &len, NULL))
+    {
+      gtk_text_buffer_set_text (self->text_buffer, initial_text, len);
+      g_free (initial_text);
+    }
+  else if (g_file_get_contents (path1, &initial_text, &len, NULL))
+    {
+      self->auto_reload = FALSE;
+      gtk_revealer_set_reveal_child (GTK_REVEALER (self->crash_warning), TRUE);
+
+      gtk_text_buffer_set_text (self->text_buffer, initial_text, len);
+      g_free (initial_text);
+    }
+  else
+    {
+      /* Default */
+      gtk_text_buffer_set_text (self->text_buffer,
+         "shadow {\n"
+         "  child: texture {\n"
+         "    bounds: 0 0 128 128;\n"
+         "    texture: url(\"resource:///org/gtk/gtk4/node-editor/icons/apps/org.gtk.gtk4.NodeEditor.svg\");\n"
+         "  }\n"
+         "  shadows: rgba(0,0,0,0.5) 0 1 12;\n"
+         "}\n"
+         "\n"
+         "transform {\n"
+         "  child: text {\n"
+         "    color: rgb(46,52,54);\n"
+         "    font: \"Cantarell Bold 11\";\n"
+         "    glyphs: \"GTK Node Editor\";\n"
+         "    offset: 8 14.418;\n"
+         "  }\n"
+         "  transform: translate(0, 140);\n"
+         "}", -1);
+    }
+
+  g_free (path);
+  g_free (path1);
+}
+
+static void
+autosave_contents (NodeEditorWindow *self)
+{
+  char *path = NULL;
+  char *dir = NULL;
+  char *contents;
+  GtkTextIter start, end;
+
+  gtk_text_buffer_get_bounds (self->text_buffer, &start, &end);
+  contents = gtk_text_buffer_get_text (self->text_buffer, &start, &end, TRUE);
+  path = get_autosave_path ("-unsafe");
+  dir = g_path_get_dirname (path);
+  g_mkdir_with_parents (dir, 0755);
+  g_file_set_contents (path, contents, -1, NULL);
+
+  g_free (dir);
+  g_free (path);
+  g_free (contents);
+}
+
+static void
+mark_autosave_as_safe (void)
+{
+  char *path1 = NULL;
+  char *path2 = NULL;
+
+  path1 = get_autosave_path ("-unsafe");
+  path2 = get_autosave_path (NULL);
+
+  g_rename (path1, path2);
+}
+
+static gboolean
+update_timeout_cb (gpointer data)
+{
+  NodeEditorWindow *self = data;
+
+  self->update_timeout = 0;
+
+  mark_autosave_as_safe ();
+
+  return G_SOURCE_REMOVE;
+}
+
+static void
+initiate_autosave (NodeEditorWindow *self)
+{
+  autosave_contents (self);
+
+  if (self->update_timeout != 0)
+    g_source_remove (self->update_timeout);
+
+  self->update_timeout = g_timeout_add (100, update_timeout_cb, self);
+}
+
 static void
 node_editor_window_init (NodeEditorWindow *self)
 {
+  GAction *action;
+
   gtk_widget_init_template (GTK_WIDGET (self));
+
+  self->auto_reload = TRUE;
 
   self->renderers = g_list_store_new (GDK_TYPE_PAINTABLE);
   gtk_list_box_bind_model (GTK_LIST_BOX (self->renderer_listbox),
@@ -1646,6 +1880,10 @@ node_editor_window_init (NodeEditorWindow *self)
   g_array_set_clear_func (self->errors, (GDestroyNotify)text_view_error_free);
 
   g_action_map_add_action_entries (G_ACTION_MAP (self), win_entries, G_N_ELEMENTS (win_entries), self);
+
+  action = G_ACTION (g_property_action_new ("auto-reload", self, "auto-reload"));
+  g_action_map_add_action (G_ACTION_MAP (self), action);
+  g_object_unref (action);
 
   self->tag_table = gtk_text_tag_table_new ();
   gtk_text_tag_table_add (self->tag_table,
@@ -1684,25 +1922,9 @@ node_editor_window_init (NodeEditorWindow *self)
   g_signal_connect (self->scale_scale, "notify::value", G_CALLBACK (scale_changed), self);
   gtk_text_view_set_buffer (GTK_TEXT_VIEW (self->text_view), self->text_buffer);
 
-  /* Default */
-  gtk_text_buffer_set_text (self->text_buffer,
-         "shadow {\n"
-         "  child: texture {\n"
-         "    bounds: 0 0 128 128;\n"
-         "    texture: url(\"resource:///org/gtk/gtk4/node-editor/icons/apps/org.gtk.gtk4.NodeEditor.svg\");\n"
-         "  }\n"
-         "  shadows: rgba(0,0,0,0.5) 0 1 12;\n"
-         "}\n"
-         "\n"
-         "transform {\n"
-         "  child: text {\n"
-         "    color: rgb(46,52,54);\n"
-         "    font: \"Cantarell Bold 11\";\n"
-         "    glyphs: \"GTK Node Editor\";\n"
-         "    offset: 8 14.418;\n"
-         "  }\n"
-         "  transform: translate(0, 140);\n"
-         "}", -1);
+  set_initial_text (self);
+
+  g_signal_connect_swapped (self->text_buffer, "changed", G_CALLBACK (initiate_autosave), self);
 
   if (g_getenv ("GSK_RENDERER"))
     {

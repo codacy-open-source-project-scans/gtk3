@@ -119,7 +119,7 @@ gsk_gl_device_create_atlas_image (GskGpuDevice *device,
   GskGLDevice *self = GSK_GL_DEVICE (device);
 
   return gsk_gl_image_new (self,
-                           GDK_MEMORY_R8G8B8A8_PREMULTIPLIED,
+                           GDK_MEMORY_DEFAULT,
                            GSK_GPU_IMAGE_RENDERABLE,
                            width,
                            height);
@@ -638,6 +638,7 @@ gsk_gl_device_find_gl_format (GskGLDevice      *self,
       *out_format = format;
       *out_flags = flags;
       gdk_memory_format_gl_format (format,
+                                   gdk_gl_context_get_use_es (context),
                                    out_gl_internal_format,
                                    out_gl_format,
                                    out_gl_type,
@@ -647,6 +648,7 @@ gsk_gl_device_find_gl_format (GskGLDevice      *self,
 
   /* Second, try the potential RGBA format */
   if (gdk_memory_format_gl_rgba_format (format,
+                                        gdk_gl_context_get_use_es (context),
                                         &alt_format,
                                         out_gl_internal_format,
                                         out_gl_format,
@@ -670,6 +672,7 @@ gsk_gl_device_find_gl_format (GskGLDevice      *self,
           *out_format = fallbacks[i];
           *out_flags = flags;
           gdk_memory_format_gl_format (fallbacks[i],
+                                       gdk_gl_context_get_use_es (context),
                                        out_gl_internal_format,
                                        out_gl_format,
                                        out_gl_type,

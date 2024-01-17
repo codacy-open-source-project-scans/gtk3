@@ -1796,6 +1796,7 @@ static TranslationEntry translations[] = {
   { FALSE, "org.gnome.desktop.wm.preferences", "action-right-click-titlebar", "gtk-titlebar-right-click", G_TYPE_STRING, { .s = "menu" } },
   { FALSE, "org.gnome.desktop.a11y", "always-show-text-caret", "gtk-keynav-use-caret", G_TYPE_BOOLEAN, { .b = FALSE } },
   { FALSE, "org.gnome.desktop.a11y.interface", "high-contrast", "high-contast", G_TYPE_NONE, { .b = FALSE } },
+  { FALSE, "org.gnome.desktop.a11y.interface", "show-status-shapes", "gtk-show-status-shapes", G_TYPE_BOOLEAN, { .b = FALSE } },
   /* Note, this setting doesn't exist, the portal and gsd fake it */
   { FALSE, "org.gnome.fontconfig", "serial", "gtk-fontconfig-timestamp", G_TYPE_NONE, { .i = 0 } },
 };
@@ -1846,13 +1847,6 @@ find_translation_entry_by_setting (const char *setting)
 }
 
 static void
-high_contrast_changed (GdkDisplay *display)
-{
-  gdk_display_setting_changed (display, "gtk-theme-name");
-  gdk_display_setting_changed (display, "gtk-icon-theme-name");
-}
-
-static void
 settings_changed (GSettings  *settings,
                   const char *key,
                   GdkDisplay *display)
@@ -1866,7 +1860,7 @@ settings_changed (GSettings  *settings,
       if (entry->type != G_TYPE_NONE)
         gdk_display_setting_changed (display, entry->setting);
       else if (strcmp (key, "high-contrast") == 0)
-        high_contrast_changed (display);
+        gdk_display_setting_changed (display, "gtk-theme-name");
       else
         update_xft_settings (display);
     }

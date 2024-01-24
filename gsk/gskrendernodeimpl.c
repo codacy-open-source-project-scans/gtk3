@@ -3335,6 +3335,7 @@ gsk_container_node_new (GskRenderNode **children,
       self->children = g_malloc_n (n_children, sizeof (GskRenderNode *));
 
       self->children[0] = gsk_render_node_ref (children[0]);
+      node->offscreen_for_opacity = children[0]->offscreen_for_opacity;
       gsk_rect_init_from_rect (&bounds, &(children[0]->bounds));
       node->preferred_depth = gdk_memory_depth_merge (node->preferred_depth,
                                                       gsk_render_node_get_preferred_depth (children[0]));
@@ -4091,6 +4092,7 @@ gsk_repeat_node_draw_tiled (cairo_t                *cr,
                             const graphene_rect_t  *child_bounds)
 {
   cairo_pattern_t *pattern;
+  cairo_matrix_t matrix;
 
   cairo_save (cr);
   /* reset the clip so we get an unclipped pattern for repeating */
@@ -4107,6 +4109,11 @@ gsk_repeat_node_draw_tiled (cairo_t                *cr,
   cairo_restore (cr);
 
   cairo_pattern_set_extend (pattern, CAIRO_EXTEND_REPEAT);
+  cairo_pattern_get_matrix (pattern, &matrix);
+  cairo_matrix_translate (&matrix,
+                          - x * child_bounds->size.width,
+                          - y * child_bounds->size.height);
+  cairo_pattern_set_matrix (pattern, &matrix);
   cairo_set_source (cr, pattern);
   cairo_pattern_destroy (pattern);
 

@@ -785,6 +785,27 @@ project_build_root = meson.current_build_dir()
 
 gen_visibility_macros = find_program('build-aux/meson/gen-visibility-macros.py')
 
+gen_profile_conf = find_program('build-aux/meson/gen-profile-conf.py')
+
+profile = get_option('profile')
+if profile == 'auto'
+  if gtk_minor_version.is_even()
+    profile = 'default'
+  else
+    profile = 'devel'
+  endif
+endif
+
+profile_conf_h = declare_dependency(
+  sources: custom_target('profile-conf',
+    command: [gen_profile_conf, meson.project_source_root(), profile],
+    capture: true,
+    output: 'profile_conf.h',
+    build_by_default: true,
+    build_always_stale: true,
+  )
+)
+
 subdir('gdk/version')
 subdir('gtk/css')
 subdir('gdk')

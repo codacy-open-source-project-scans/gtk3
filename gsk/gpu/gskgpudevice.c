@@ -48,7 +48,7 @@ struct _GskGpuCachedClass
                                                          GskGpuCached           *cached);
   gboolean              (* should_collect)              (GskGpuDevice           *device,
                                                          GskGpuCached           *cached,
-                                                         gint64                  timestsamp);
+                                                         gint64                  timestamp);
 };
 
 struct _GskGpuCached
@@ -285,7 +285,7 @@ gsk_gpu_cached_glyph_free (GskGpuDevice *device,
 static gboolean
 gsk_gpu_cached_glyph_should_collect (GskGpuDevice *device,
                                      GskGpuCached *cached,
-                                     gint64        timestsamp)
+                                     gint64        timestamp)
 {
   /* FIXME */
   return FALSE;
@@ -336,7 +336,7 @@ gsk_gpu_device_gc (GskGpuDevice *self,
     {
       next = cached->next;
       if (gsk_gpu_cached_should_collect (self, cached, timestamp))
-        gsk_gpu_cached_free (self, priv->first_cached);
+        gsk_gpu_cached_free (self, cached);
     }
 }
 
@@ -517,15 +517,21 @@ gsk_gpu_cached_atlas_allocate (GskGpuCachedAtlas *atlas,
 
   if (best_slice >= i && i == atlas->n_slices)
     {
+      gsize slice_height;
+
       if (!can_add_slice)
+        return FALSE;
+
+      slice_height = round_up_atlas_size (MAX (height, 4));
+      if (slice_height > ATLAS_SIZE - y)
         return FALSE;
 
       atlas->n_slices++;
       if (atlas->n_slices == MAX_SLICES_PER_ATLAS)
-        atlas->slices[i].height = ATLAS_SIZE - y;
-      else
-        atlas->slices[i].height = round_up_atlas_size (MAX (height, 4));
+        slice_height = ATLAS_SIZE - y;
+
       atlas->slices[i].width = 0;
+      atlas->slices[i].height = slice_height;
       best_y = y;
       best_slice = i;
     }
@@ -650,6 +656,7 @@ gsk_gpu_device_lookup_glyph_image (GskGpuDevice           *self,
   graphene_point_t origin;
   GskGpuImage *image;
   gsize atlas_x, atlas_y, padding;
+  float subpixel_x, subpixel_y;
 
   cache = g_hash_table_lookup (priv->glyph_cache, &lookup);
   if (cache)
@@ -661,12 +668,13 @@ gsk_gpu_device_lookup_glyph_image (GskGpuDevice           *self,
       return cache->image;
     }
 
-  cache = g_new (GskGpuCachedGlyph, 1);
+  subpixel_x = (flags & 3) / 4.f;
+  subpixel_y = ((flags >> 2) & 3) / 4.f;
   pango_font_get_glyph_extents (font, glyph, &ink_rect, NULL);
-  origin.x = floor (ink_rect.x * scale / PANGO_SCALE);
-  origin.y = floor (ink_rect.y * scale / PANGO_SCALE);
-  rect.size.width = ceil ((ink_rect.x + ink_rect.width) * scale / PANGO_SCALE) - origin.x;
-  rect.size.height = ceil ((ink_rect.y + ink_rect.height) * scale / PANGO_SCALE) - origin.y;
+  origin.x = floor (ink_rect.x * scale / PANGO_SCALE + subpixel_x);
+  origin.y = floor (ink_rect.y * scale / PANGO_SCALE + subpixel_y);
+  rect.size.width = ceil ((ink_rect.x + ink_rect.width) * scale / PANGO_SCALE + subpixel_x) - origin.x;
+  rect.size.height = ceil ((ink_rect.y + ink_rect.height) * scale / PANGO_SCALE + subpixel_y) - origin.y;
   padding = 1;
 
   image = gsk_gpu_device_add_atlas_image (self,
@@ -695,8 +703,8 @@ gsk_gpu_device_lookup_glyph_image (GskGpuDevice           *self,
   cache->scale = scale,
   cache->bounds = rect,
   cache->image = image,
-  cache->origin = GRAPHENE_POINT_INIT (- origin.x + (flags & 3) / 4.f,
-                                       - origin.y + ((flags >> 2) & 3) / 4.f);
+  cache->origin = GRAPHENE_POINT_INIT (- origin.x + subpixel_x,
+                                       - origin.y + subpixel_y);
 
   gsk_gpu_upload_glyph_op (frame,
                            cache->image,
@@ -721,3 +729,4 @@ gsk_gpu_device_lookup_glyph_image (GskGpuDevice           *self,
 }
 
 /* }}} */
+/* vim:set foldmethod=marker expandtab: */

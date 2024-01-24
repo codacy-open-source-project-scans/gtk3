@@ -386,7 +386,7 @@ gdk_gl_context_create_egl_context (GdkGLContext *context,
   else if (epoxy_has_egl_extension (egl_display, "EGL_EXT_swap_buffers_with_damage"))
     priv->eglSwapBuffersWithDamage = (gpointer) epoxy_eglGetProcAddress ("eglSwapBuffersWithDamageEXT");
 
-  gdk_profiler_end_mark (start_time, "realize GdkWaylandGLContext", NULL);
+  gdk_profiler_end_mark (start_time, "Create EGL context", NULL);
 
   return api;
 }
@@ -669,7 +669,7 @@ gdk_gl_context_real_end_frame (GdkDrawContext *draw_context,
 
   egl_surface = gdk_surface_get_egl_surface (surface);
 
-  gdk_profiler_add_mark (GDK_PROFILER_CURRENT_TIME, 0, "EGL", "swap buffers");
+  gdk_profiler_add_mark (GDK_PROFILER_CURRENT_TIME, 0, "EGL swap buffers", NULL);
 
   if (priv->eglSwapBuffersWithDamage)
     {
@@ -2040,15 +2040,6 @@ gdk_gl_context_has_sync (GdkGLContext *self)
   GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
 
   return priv->has_sync;
-}
-
-/* Return if GL_BGRA works with glTexImage2D */
-gboolean
-gdk_gl_context_has_bgra (GdkGLContext *self)
-{
-  GdkGLContextPrivate *priv = gdk_gl_context_get_instance_private (self);
-
-  return priv->has_bgra;
 }
 
 /* Return if glGenVertexArrays, glBindVertexArray and glDeleteVertexArrays
